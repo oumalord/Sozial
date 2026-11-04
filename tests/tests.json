@@ -1,0 +1,27 @@
+[
+  {
+    "name": "Signed-out visitors see the SocialFlow sign-in screen",
+    "sanity": true,
+    "viewport": "desktop",
+    "covers": ["authentication gate", "landing screen"],
+    "description": "Verifies visitors without a session are asked to sign in before seeing any workspace data.",
+    "steps": ["Open the app while signed out"],
+    "expected": "The SocialFlow name, email and password fields, and a Sign in button are visible."
+  },
+  {
+    "name": "Sign-in screen works on mobile",
+    "viewport": "mobile",
+    "covers": ["mobile layout", "authentication gate"],
+    "description": "Verifies the sign-in screen fits a phone screen without horizontal scrolling.",
+    "steps": ["Open the app on a mobile viewport while signed out"],
+    "expected": "The SocialFlow name and email/password sign-in form are fully visible without horizontal scrolling."
+  },
+  {
+    "name": "Signed-out users can register and sign in",
+    "viewport": "desktop",
+    "covers": ["Neon-backed authentication"],
+    "description": "Verifies the app can create an account and establish a same-origin session.",
+    "steps": ["Open the app while signed out", "Choose Create an account", "Submit a valid name, email and password"],
+    "expected": "The visitor is signed in and the app opens the workspace onboarding flow."
+  }
+]
