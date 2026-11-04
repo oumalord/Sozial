@@ -9,7 +9,7 @@ const TYPES: [string, string, string][] = [['creator', 'Content creator', 'Grow 
 const STEPS = ['Workspace', 'Account type', 'Accounts', 'Time zone', 'Frequency', 'Notifications', 'Finish'];
 
 export default function Onboarding() {
-    const { ws, meta, refresh, toast, profile } = useApp();
+    const { ws, meta, refresh, toast, profile, isAdmin } = useApp();
     const [step, setStep] = useState(ws ? 3 : 1);
     const [name, setName] = useState('');
     const [type, setType] = useState('creator');
@@ -55,6 +55,7 @@ export default function Onboarding() {
     return (
         <div className='fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-navy p-4'>
             <div className='fade-in w-full max-w-xl rounded-3xl border border-line bg-surface p-6 shadow-2xl sm:p-8'>
+                {isAdmin && !ws && <div className='mb-4 flex justify-end'><a href='#/admin' className='text-xs font-semibold text-brand hover:underline'>Open superadmin console</a></div>}
                 <div className='mb-6 flex items-center gap-1.5'>
                     {STEPS.slice(0, 6).map((s, i) => <div key={s} className={cx('h-1.5 flex-1 rounded-full', i + 1 <= step ? 'bg-brand' : 'bg-surface2')} />)}
                 </div>

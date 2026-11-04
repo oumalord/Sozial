@@ -1,0 +1,40 @@
+name: SocialFlow background jobs
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  publish-due:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/5 * * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run publishing queue
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          test -n "$APP_BASE_URL" || { echo "Set the APP_BASE_URL Actions variable."; exit 1; }
+          test -n "$CRON_SECRET" || { echo "Set the CRON_SECRET Actions secret."; exit 1; }
+          curl --fail-with-body --silent --show-error --max-time 60 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "${APP_BASE_URL%/}/api/cron/publish"
+
+  evergreen:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 * * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run evergreen recycler
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          test -n "$APP_BASE_URL" || { echo "Set the APP_BASE_URL Actions variable."; exit 1; }
+          test -n "$CRON_SECRET" || { echo "Set the CRON_SECRET Actions secret."; exit 1; }
+          curl --fail-with-body --silent --show-error --max-time 60 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "${APP_BASE_URL%/}/api/cron/evergreen"

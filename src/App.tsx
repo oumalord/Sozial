@@ -8,6 +8,7 @@ import { timeAgo, timezones, browserTz } from './lib/format';
 import Onboarding from './pages/Onboarding';
 import Overview from './pages/Overview';
 import Analytics from './pages/Analytics';
+import Admin from './pages/Admin';
 import Accounts from './pages/Accounts';
 import Settings from './pages/Settings';
 import Media from './pages/Media';
@@ -17,6 +18,7 @@ import Studio from './pages/Studio';
 const PAGES: Record<string, any> = {
     overview: Overview,
     analytics: Analytics,
+    admin: Admin,
     studio: Studio,
     calendar: Calendar,
     media: Media,
@@ -164,7 +166,10 @@ function Shell() {
     const [accountMenu, setAccountMenu] = useState(false);
     useEffect(() => setDrawer(false), [page]);
 
-    if (!ws) return <Onboarding />;
+    if (!ws) {
+        if (isAdmin && page === 'admin') return <Admin />;
+        return <Onboarding />;
+    }
     const showOnboarding = !ws.onboardingDone && can('settings.manage');
     const items = NAV.filter(([k]) => PAGES[k]).concat(isAdmin && PAGES.admin ? [['admin', 'Administration', ShieldCheck] as [string, string, any]] : []);
     const Page = PAGES[page] || PAGES.overview;

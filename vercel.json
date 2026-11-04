@@ -5,9 +5,5 @@
   "functions": {
     "api/[...path].ts": { "maxDuration": 30 },
     "api/cron/*.ts": { "maxDuration": 60 }
-  },
-  "crons": [
-    { "path": "/api/cron/publish", "schedule": "*/5 * * * *" },
-    { "path": "/api/cron/evergreen", "schedule": "0 * * * *" }
-  ]
+  }
 }

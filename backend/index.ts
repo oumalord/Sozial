@@ -199,6 +199,7 @@ const routes: Record<string, RouterMiddleware[]> = {
         if (ws && !ws.deletedAt) {
           await db.tx.add(T.mem(u.userId), [{ id: ws.id, wsId: ws.id, role: inv.role }]);
           await db.tx.add(T.members(ws.id), [{ id: u.userId, userId: u.userId, email, name: profile.name, role: inv.role, status: 'active', joinedAt: iso() }]);
+          if (inv.role === 'owner') await patchRec(T.workspaces, ws.id, { ownerId: u.userId, ownerEmail: email, ownerName: profile.name });
           await delRec(T.wsinv(ws.id), [ekey(email)]);
         }
         await delRec(T.inv(email), [inv.id]);
@@ -858,8 +859,46 @@ const routes: Record<string, RouterMiddleware[]> = {
     return json({ users: profiles.length, workspaces: workspaces.length, pendingJobs: jobs.length, overdueJobs: overdue, failedJobs: failed.length, planDistribution: dist, engine, integrations: await integrationStatus() });
   }),
   'GET /api/admin/workspaces': ADM(async () => {
-    const list = (await listRecs(T.workspaces, 300)).filter((w) => !w.deletedAt).map((w) => ({ id: w.id, name: w.name, type: w.type, planId: w.planId || 'free', ownerId: w.ownerId, createdAt: w.createdAt, storageBytes: w.storageBytes || 0, trial: w.trial || null }));
+    const workspaces = (await listRecs(T.workspaces, 300)).filter((w) => !w.deletedAt);
+    const list: Rec[] = [];
+    for (const w of workspaces) {
+      const [profile, member] = await Promise.all([
+        w.ownerId ? getRec(T.profiles, w.ownerId) : Promise.resolve(null),
+        listRecs(T.members(w.id), 100).then((members) => members.find((item) => item.role === 'owner') || null),
+      ]);
+      list.push({ id: w.id, name: w.name, type: w.type, planId: w.planId || 'free', ownerId: w.ownerId || null, ownerName: w.ownerName || profile?.name || member?.name || null, ownerEmail: w.ownerEmail || profile?.email || member?.email || null, ownerStatus: w.ownerId ? 'active' : 'invited', createdAt: w.createdAt, storageBytes: w.storageBytes || 0, trial: w.trial || null });
+    }
     return json({ workspaces: list });
+  }),
+  'POST /api/admin/workspaces': ADM(async (ctx) => {
+    const b = B(ctx);
+    const name = str(b.name, 80).trim();
+    const ownerEmail = str(b.ownerEmail, 200).trim().toLowerCase();
+    const ownerName = str(b.ownerName, 80).trim() || ownerEmail.split('@')[0] || 'Workspace owner';
+    const type = ['creator', 'business', 'agency', 'manager'].includes(b.type) ? b.type : 'business';
+    const timezone = isValidTz(b.timezone) ? b.timezone : 'UTC';
+    if (!name) return error('Give the organization a name.', 400);
+    if (!/^\S+@\S+\.\S+$/.test(ownerEmail)) return error('Enter a valid owner email address.', 400);
+    await ensurePlans();
+    const planId = str(b.planId, 30) || 'free';
+    const plan = await getRec(T.plans, planId);
+    if (!plan || !plan.active) return error('Choose an active plan.', 400);
+    const authUser = await getRec('auth_users', ownerEmail);
+    const ownerProfile = authUser ? await getRec(T.profiles, authUser.userId) : null;
+    const ownerId = authUser?.userId || null;
+    const id = uid('w');
+    const createdAt = iso();
+    const workspace = await addRec(T.workspaces, { id, name, type, timezone, ownerId, ownerName: ownerProfile?.name || authUser?.name || ownerName, ownerEmail, planId, approvalPolicy: 'creators', settings: DEFAULT_SETTINGS, onboardingDone: false, storageBytes: 0, createdAt }, 'w');
+    await db.tx.add(T.brands(id), [{ id: 'main', name, color: '#1b65e8', createdAt }]);
+    if (ownerId) {
+      await db.tx.add(T.mem(ownerId), [{ id, wsId: id, role: 'owner' }]);
+      await db.tx.add(T.members(id), [{ id: ownerId, userId: ownerId, email: ownerEmail, name: ownerProfile?.name || authUser?.name || ownerName, role: 'owner', status: 'active', joinedAt: createdAt }]);
+    } else {
+      await db.tx.add(T.wsinv(id), [{ id: ekey(ownerEmail), email: ownerEmail, role: 'owner', invitedBy: ctx.user!.name || ctx.user!.email, at: createdAt }]);
+      await db.tx.add(T.inv(ownerEmail), [{ id, wsId: id, wsName: name, role: 'owner' }]);
+    }
+    await audit(ctx, id, 'admin.workspace_provisioned', { name, type, ownerEmail, planId });
+    return json({ workspace: { id, name, type, ownerEmail, ownerStatus: ownerId ? 'active' : 'invited', planId, planName: plan.name, createdAt }, ownerRegistered: !!ownerId, inviteDelivery: ownerId ? 'The owner can sign in with their existing account.' : 'Email delivery is not configured. Share the app URL and have the owner register with this email to claim the workspace.' }, 201);
   }),
   'PUT /api/admin/workspaces/:w': ADM(async (ctx) => {
     const planId = str(B(ctx).planId, 30);
