@@ -1,6 +1,5 @@
 import { neon } from '@neondatabase/serverless';
 import type { NeonQueryFunction } from '@neondatabase/serverless';
-import { DeleteObjectsCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
@@ -112,12 +111,13 @@ export const db = {
   },
 };
 
-let cloudflareClient: S3Client | undefined;
-function r2Client(): S3Client {
+let cloudflareClient: import('@aws-sdk/client-s3').S3Client | undefined;
+async function r2Client(): Promise<import('@aws-sdk/client-s3').S3Client> {
   const accountId = process.env.R2_ACCOUNT_ID;
   const accessKeyId = process.env.R2_ACCESS_KEY_ID;
   const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
   if (!accountId || !accessKeyId || !secretAccessKey) throw new Error('Configure R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY.');
+  const { S3Client } = await import('@aws-sdk/client-s3');
   return cloudflareClient ||= new S3Client({
     region: 'auto',
     endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
@@ -131,7 +131,7 @@ export const storage = {
     const publicBase = process.env.R2_PUBLIC_BASE_URL?.replace(/\/+$/, '');
     if (!bucket || !publicBase) throw new Error('Configure R2_BUCKET_NAME and R2_PUBLIC_BASE_URL.');
     if (new URL(publicBase).protocol !== 'https:') throw new Error('R2_PUBLIC_BASE_URL must use public HTTPS.');
-    const client = r2Client();
+    const [{ PutObjectCommand }, client] = await Promise.all([import('@aws-sdk/client-s3'), r2Client()]);
     const saved: { url: string; path: string }[] = [];
     for (const file of files) {
       await client.send(new PutObjectCommand({ Bucket: bucket, Key: file.path, Body: Buffer.from(file.content, 'base64'), ContentType: file.contentType, CacheControl: 'public, max-age=31536000, immutable' }));
@@ -150,7 +150,7 @@ export const storage = {
     if (!paths.length) return;
     const bucket = process.env.R2_BUCKET_NAME;
     if (!bucket) throw new Error('Configure R2_BUCKET_NAME before deleting media.');
-    const client = r2Client();
+    const [{ DeleteObjectsCommand }, client] = await Promise.all([import('@aws-sdk/client-s3'), r2Client()]);
     for (let i = 0; i < paths.length; i += 1000) {
       await client.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: paths.slice(i, i + 1000).map((Key) => ({ Key })), Quiet: true } }));
     }

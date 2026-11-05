@@ -4,6 +4,9 @@
   "outputDirectory": "dist",
   "functions": {
     "api/[...path].ts": { "maxDuration": 30 },
+    "api/auth/*.ts": { "maxDuration": 30 },
+    "api/w/*.ts": { "maxDuration": 30 },
+    "api/admin/*.ts": { "maxDuration": 30 },
     "api/cron/*.ts": { "maxDuration": 60 }
   }
 }
