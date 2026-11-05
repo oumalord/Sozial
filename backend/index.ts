@@ -2,11 +2,11 @@ import { router, requireAuth, requireAdminEmailAllowlist, storage, db, revokeUse
 import type { RouterContext, RouterMiddleware, RouterResponse } from './lib/runtime';
 import {
   T, ROLES, PERMS, ADMIN_EMAILS, json, error, iso, uid, ekey, getRec, addRec, patchRec, delRec, listRecs, setSystem, ensurePlans, planFor, needFeature,
-  needsApproval, getUsage, bumpUsage, isValidTz, zonedToUtcMs, access, isResp, audit, act,
+  needsApproval, getUsage, bumpUsage, isValidTz, zonedToUtcMs, access, isResp, audit, act, withUnlimitedTeam,
 } from './lib/core';
 import type { Rec, Access } from './lib/core';
 import { PLATFORMS } from './lib/platforms';
-import { integrationStatus, providerKey, verifyAyrshare, paymentsConfigured } from './lib/providers';
+import { getPostizIntegration, integrationStatus, listPostizIntegrations, postizConfig, paymentsConfigured } from './lib/providers';
 import { mutatePost, enqueue, processDue, evergreenTick, validatePost, notify, nextEvergreenStart } from './lib/engine';
 import { overview, analytics, exportCsv, smartTimes, loadPosts } from './lib/reports';
 import { runAi } from './lib/ai';
@@ -67,6 +67,11 @@ function ADM(fn: (ctx: RouterContext) => Promise<RouterResponse>): RouterMiddlew
   ];
 }
 
+async function adminWorkspace(w: string): Promise<Rec | RouterResponse> {
+  const ws = await getRec(T.workspaces, w);
+  return ws && !ws.deletedAt ? ws : error('Workspace not found', 404);
+}
+
 function cleanTags(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   return v.map((t) => String(t).split('#').join('').split(' ').join('').slice(0, 60)).filter(Boolean).slice(0, 60);
@@ -121,7 +126,7 @@ function publicWs(ws: Rec, role: string, plan: Rec): Rec {
 
 async function publicPlans(): Promise<Rec[]> {
   await ensurePlans();
-  return (await listRecs(T.plans, 20)).filter((p) => p.active).sort((x, y) => x.sort - y.sort);
+  return (await listRecs(T.plans, 20)).filter((p) => p.active).map(withUnlimitedTeam).sort((x, y) => x.sort - y.sort);
 }
 
 function range(ctx: RouterContext): { from: number; to: number } {
@@ -205,7 +210,7 @@ const routes: Record<string, RouterMiddleware[]> = {
         await delRec(T.inv(email), [inv.id]);
       }
     }
-    const mems = await listRecs(T.mem(u.userId), 100);
+    const mems = await listRecs(T.mem(u.userId), 5000);
     const docs = mems.length ? await db.get(T.workspaces, mems.map((m) => m.id)) : [];
     const workspaces: Rec[] = [];
     for (let i = 0; i < mems.length; i++) {
@@ -233,7 +238,7 @@ const routes: Record<string, RouterMiddleware[]> = {
   }),
   'DELETE /api/profile': U(async (ctx) => {
     const u = ctx.user!;
-    for (const m of await listRecs(T.mem(u.userId), 100)) {
+    for (const m of await listRecs(T.mem(u.userId), 5000)) {
       const members = await listRecs(T.members(m.id), 5);
       if (m.role === 'owner' && members.filter((x) => x.id !== u.userId).length === 0) await patchRec(T.workspaces, m.id, { deletedAt: iso() });
       await delRec(T.members(m.id), [u.userId]);
@@ -245,10 +250,34 @@ const routes: Record<string, RouterMiddleware[]> = {
     return json({ ok: true });
   }),
   'GET /api/integrations': U(async () => json({ ...(await integrationStatus()), platforms: PLATFORMS })),
+  'GET /api/admin/postiz/integrations': ADM(async (ctx) => {
+    const config = await postizConfig();
+    if (!config) return error('Configure POSTIZ_API_URL and POSTIZ_API_KEY on the SozialFlow server.', 409);
+    const integrations = await listPostizIntegrations(config);
+    const workspaceId = str(ctx.query.workspace, 100);
+    if (workspaceId) {
+      const wsResult = await adminWorkspace(workspaceId);
+      if (isResp(wsResult)) return wsResult;
+    }
+    const assignments = await db.get(T.postizAssignments, integrations.map((integration) => integration.id));
+    const withAssignments = integrations.map((integration, index) => {
+      const assignment = assignments[index];
+      return { ...integration, assigned: !!assignment && !assignment.deletedAt, assignedToWorkspace: !!assignment && !assignment.deletedAt && assignment.wsId === workspaceId };
+    });
+    const parsedUrl = new URL(config.apiUrl);
+    parsedUrl.username = '';
+    parsedUrl.password = '';
+    parsedUrl.search = '';
+    parsedUrl.hash = '';
+    parsedUrl.pathname = parsedUrl.pathname.replace(/\/api\/public\/v1\/?$/, '') || '/';
+    const dashboardUrl = parsedUrl.toString().replace(/\/$/, '');
+    return json({ integrations: withAssignments, dashboardUrl });
+  }),
 
   // ---------- workspaces ----------
   'POST /api/workspaces': U(async (ctx) => {
     const u = ctx.user!;
+    if (!ADMIN_EMAILS.includes((u.email || '').toLowerCase())) return error('Only a SozialFlow superadmin can provision a new organization. Ask your platform administrator for an invitation.', 403);
     const b = B(ctx);
     const name = str(b.name, 80).trim();
     if (!name) return error('Give the workspace a name.', 400);
@@ -316,7 +345,7 @@ const routes: Record<string, RouterMiddleware[]> = {
   'GET /api/w/:w/export': W(undefined, async (_ctx, a) => {
     const blocked = needFeature(a.plan, 'exports');
     if (blocked) return blocked;
-    return json({ csv: await exportCsv(a), filename: 'socialflow-publishing-report.csv' });
+    return json({ csv: await exportCsv(a), filename: 'sozialflow-publishing-report.csv' });
   }),
   'GET /api/w/:w/smart-times': W(undefined, async (ctx, a) => json(await smartTimes(a, str(ctx.query.platform, 20), Math.min(12, Number(ctx.query.count) || 6)))),
 
@@ -334,52 +363,69 @@ const routes: Record<string, RouterMiddleware[]> = {
     return json({ ok: true });
   }),
   'GET /api/w/:w/accounts': W(undefined, async (_ctx, a) => {
-    const keyOk = !!(await providerKey());
+    const providerReady = !!(await postizConfig());
     const list = (await listRecs(T.accounts(a.ws.id), 200)).filter((x) => !x.deletedAt).map((x) => {
       let connection: Rec;
-      if (x.mode !== 'provider') connection = { state: 'publishing_unavailable', message: 'Manual mode: SocialFlow reminds you and you publish by hand.' };
-      else if (!keyOk) connection = { state: 'pending_approval', message: 'No publishing provider is configured yet (AYRSHARE_API_KEY).' };
-      else connection = x.connection || { state: 'disconnected', message: 'Not verified yet. Run Verify connection.' };
-      return { ...x, connection };
+      if (!providerReady) connection = { state: 'pending_approval', message: 'Postiz is not configured on the SozialFlow server.' };
+      else if (!x.providerIntegrationId) connection = { state: 'disconnected', message: 'A SozialFlow administrator has not assigned a Postiz channel yet.' };
+      else connection = x.connection || { state: 'connected', message: 'Assigned by a SozialFlow administrator.' };
+      const { providerIntegrationId, providerIdentifier, ...publicAccount } = x;
+      return { ...publicAccount, postizAssigned: !!providerIntegrationId, connection };
     });
     return json({ accounts: list, limit: a.plan.limits.accounts });
   }),
-  'POST /api/w/:w/accounts': W('accounts.manage', async (ctx, a) => {
+  'POST /api/w/:w/accounts': ADM(async (ctx) => {
+    const wsResult = await adminWorkspace(ctx.params.w);
+    if (isResp(wsResult)) return wsResult;
+    const ws = wsResult;
     const b = B(ctx);
-    if (!PLATFORMS[b.platform]) return error('Choose a supported platform.', 400);
-    const handle = str(b.handle, 100).trim();
-    if (!handle) return error('Enter the account handle or page name.', 400);
-    const live = (await listRecs(T.accounts(a.ws.id), 200)).filter((x) => !x.deletedAt);
-    const cap = a.plan.limits.accounts;
-    if (cap != null && live.length >= cap) return json({ error: 'The ' + a.plan.name + ' plan allows ' + cap + ' connected accounts.', upgrade: true }, 402);
-    const acc = await addRec(T.accounts(a.ws.id), { platform: b.platform, handle, displayName: str(b.displayName, 100).trim() || handle, mode: b.mode === 'provider' ? 'provider' : 'manual', brandId: str(b.brandId, 60) || 'main', createdAt: iso() }, 'a');
-    await act(a, 'added ' + PLATFORMS[b.platform].name + ' account ' + handle);
+    const config = await postizConfig();
+    if (!config) return error('Configure POSTIZ_API_URL and POSTIZ_API_KEY on the SozialFlow server.', 409);
+    const integration = await getPostizIntegration(str(b.postizIntegrationId, 200), config);
+    if (!integration) return error('Choose an active Postiz channel supported by SozialFlow.', 400);
+    const existingAssignment = await getRec(T.postizAssignments, integration.id);
+    if (existingAssignment && !existingAssignment.deletedAt) return error('This Postiz channel is already assigned to a SozialFlow workspace.', 409);
+    const plan = await planFor(ws);
+    const live = (await listRecs(T.accounts(ctx.params.w), 200)).filter((x) => !x.deletedAt);
+    if (plan.limits.accounts != null && live.length >= plan.limits.accounts) return json({ error: 'The ' + plan.name + ' plan allows ' + plan.limits.accounts + ' connected accounts.', upgrade: true }, 402);
+    const handle = integration.profile || integration.name;
+    const acc = await addRec(T.accounts(ctx.params.w), { platform: integration.platform, handle, displayName: integration.name, mode: 'provider', provider: 'postiz', providerIntegrationId: integration.id, providerIdentifier: integration.identifier, connection: { state: 'connected', message: 'Assigned from Postiz by a SozialFlow administrator.', checkedAt: iso() }, brandId: str(b.brandId, 60) || 'main', createdAt: iso() }, 'a');
+    if (existingAssignment) await patchRec(T.postizAssignments, integration.id, { wsId: ctx.params.w, accountId: acc.id, createdAt: iso(), deletedAt: null });
+    else await db.tx.add(T.postizAssignments, [{ id: integration.id, wsId: ctx.params.w, accountId: acc.id, createdAt: iso() }]);
     return json({ account: acc }, 201);
   }),
-  'PUT /api/w/:w/accounts/:id': W('accounts.manage', async (ctx, a) => {
+  'PUT /api/w/:w/accounts/:id': ADM(async (ctx) => {
+    const wsResult = await adminWorkspace(ctx.params.w);
+    if (isResp(wsResult)) return wsResult;
+    const account = await getRec(T.accounts(ctx.params.w), ctx.params.id);
+    if (!account || account.deletedAt) return error('Account not found', 404);
     const b = B(ctx);
     const rec: Rec = { updatedAt: iso() };
     if ('displayName' in b) rec.displayName = str(b.displayName, 100);
     if ('brandId' in b) rec.brandId = str(b.brandId, 60) || 'main';
-    if (b.mode === 'provider' || b.mode === 'manual') rec.mode = b.mode;
-    await patchRec(T.accounts(a.ws.id), ctx.params.id, rec);
+    await patchRec(T.accounts(ctx.params.w), ctx.params.id, rec);
     return json({ ok: true });
   }),
-  'DELETE /api/w/:w/accounts/:id': W('accounts.manage', async (ctx, a) => {
-    await patchRec(T.accounts(a.ws.id), ctx.params.id, { deletedAt: iso() });
-    await act(a, 'removed a social account');
+  'DELETE /api/w/:w/accounts/:id': ADM(async (ctx) => {
+    const wsResult = await adminWorkspace(ctx.params.w);
+    if (isResp(wsResult)) return wsResult;
+    const account = await getRec(T.accounts(ctx.params.w), ctx.params.id);
+    if (!account || account.deletedAt) return json({ ok: true });
+    await patchRec(T.accounts(ctx.params.w), ctx.params.id, { deletedAt: iso() });
+    if (account.providerIntegrationId) await patchRec(T.postizAssignments, account.providerIntegrationId, { deletedAt: iso() });
     return json({ ok: true });
   }),
-  'POST /api/w/:w/accounts/:id/verify': W('accounts.manage', async (ctx, a) => {
-    const acc = await getRec(T.accounts(a.ws.id), ctx.params.id);
+  'POST /api/w/:w/accounts/:id/verify': ADM(async (ctx) => {
+    const wsResult = await adminWorkspace(ctx.params.w);
+    if (isResp(wsResult)) return wsResult;
+    const acc = await getRec(T.accounts(ctx.params.w), ctx.params.id);
     if (!acc || acc.deletedAt) return error('Account not found', 404);
-    if (acc.mode !== 'provider') return error('Manual accounts have no connection to verify.', 400);
-    const key = await providerKey();
-    if (!key) return json({ error: 'No publishing provider is configured. An administrator must set AYRSHARE_API_KEY.' }, 409);
-    const res = await verifyAyrshare(key, PLATFORMS[acc.platform].ayrshareId);
-    const connection = { ...res, checkedAt: iso() };
-    await patchRec(T.accounts(a.ws.id), acc.id, { connection });
-    if (res.state === 'expired') await notify(a.ws.id, { type: 'expired', level: 'warn', title: 'Connection needs attention', body: acc.handle + ': ' + res.message });
+    const config = await postizConfig();
+    if (!config) return error('Configure POSTIZ_API_URL and POSTIZ_API_KEY on the SozialFlow server.', 409);
+    if (!acc.providerIntegrationId) return error('This account has no assigned Postiz channel.', 409);
+    const exists = await getPostizIntegration(acc.providerIntegrationId, config);
+    const connection = { state: exists ? 'connected' : 'disconnected', message: exists ? 'Postiz channel is active.' : 'The channel was removed from Postiz.', checkedAt: iso() };
+    await patchRec(T.accounts(ctx.params.w), acc.id, { connection });
     return json({ connection });
   }),
 
@@ -770,7 +816,7 @@ const routes: Record<string, RouterMiddleware[]> = {
   }),
 
   // ---------- team ----------
-  'GET /api/w/:w/team': W(undefined, async (_ctx, a) => json({ members: await listRecs(T.members(a.ws.id), 100), invites: await listRecs(T.wsinv(a.ws.id), 100), limit: a.plan.limits.members })),
+  'GET /api/w/:w/team': W(undefined, async (_ctx, a) => json({ members: await listRecs(T.members(a.ws.id), 5000), invites: await listRecs(T.wsinv(a.ws.id), 5000), limit: null, roles: ROLES })),
   'POST /api/w/:w/team/invite': W('team.manage', async (ctx, a) => {
     const blocked = needFeature(a.plan, 'team');
     if (blocked) return blocked;
@@ -778,13 +824,27 @@ const routes: Record<string, RouterMiddleware[]> = {
     const email = str(b.email, 200).trim().toLowerCase();
     if (!email.includes('@') || !email.includes('.')) return error('Enter a valid email address.', 400);
     if (!ROLES.includes(b.role) || b.role === 'owner') return error('Choose a valid role.', 400);
-    const members = await listRecs(T.members(a.ws.id), 100);
-    const invites = await listRecs(T.wsinv(a.ws.id), 100);
-    if (members.length + invites.length >= (a.plan.limits.members || 1)) return json({ error: 'Your plan allows ' + a.plan.limits.members + ' team members.', upgrade: true }, 402);
-    await db.tx.add(T.wsinv(a.ws.id), [{ id: ekey(email), email, role: b.role, invitedBy: a.name, at: iso() }]);
-    await db.tx.add(T.inv(email), [{ id: a.ws.id, wsId: a.ws.id, wsName: a.ws.name, role: b.role }]);
+    const members = await listRecs(T.members(a.ws.id), 5000);
+    const member = members.find((item) => String(item.email || '').toLowerCase() === email);
+    if (member) return error('This person is already a member of the organization.', 409);
+    const registered = await getRec('auth_users', email);
+    const profile = registered ? await getRec(T.profiles, registered.userId) : null;
+    if (registered) {
+      await db.tx.add(T.mem(registered.userId), [{ id: a.ws.id, wsId: a.ws.id, role: b.role }]);
+      await db.tx.add(T.members(a.ws.id), [{ id: registered.userId, userId: registered.userId, email, name: profile?.name || registered.name || email.split('@')[0], role: b.role, status: 'active', joinedAt: iso() }]);
+    } else {
+      const inviteId = ekey(email);
+      const existingInvite = await getRec(T.wsinv(a.ws.id), inviteId);
+      const invitation = { email, role: b.role, invitedBy: a.name, at: iso() };
+      const registrationInvite = { id: a.ws.id, wsId: a.ws.id, wsName: a.ws.name, role: b.role };
+      if (existingInvite) await patchRec(T.wsinv(a.ws.id), inviteId, invitation);
+      else await db.tx.add(T.wsinv(a.ws.id), [{ id: inviteId, ...invitation }]);
+      const existingRegistrationInvite = await getRec(T.inv(email), a.ws.id);
+      if (existingRegistrationInvite) await patchRec(T.inv(email), a.ws.id, registrationInvite);
+      else await db.tx.add(T.inv(email), [registrationInvite]);
+    }
     await audit(ctx, a.ws.id, 'team.invited', { email, role: b.role });
-    return json({ ok: true, delivery: 'The invite is matched automatically when this person signs in with this email. Email delivery is not enabled yet, so share the app link with them.' });
+    return json({ ok: true, status: registered ? 'active' : 'invited', delivery: registered ? 'The existing account now has organization access.' : 'The invite is matched automatically when this person registers with this email. Email delivery is not enabled yet, so share the app link with them.' });
   }),
   'POST /api/w/:w/team/revoke': W('team.manage', async (ctx, a) => {
     const email = str(B(ctx).email, 200).trim().toLowerCase();
@@ -848,8 +908,8 @@ const routes: Record<string, RouterMiddleware[]> = {
 
   // ---------- super administrator ----------
   'GET /api/admin/overview': ADM(async () => {
-    const profiles = await listRecs(T.profiles, 500);
-    const workspaces = (await listRecs(T.workspaces, 500)).filter((w) => !w.deletedAt);
+    const profiles = await listRecs(T.profiles, 5000);
+    const workspaces = (await listRecs(T.workspaces, 5000)).filter((w) => !w.deletedAt);
     const jobs = await listRecs(T.jobs, 400);
     const failed = await listRecs(T.jobsFailed, 200);
     const engine = await getRec(T.system, 'engine');
@@ -859,15 +919,14 @@ const routes: Record<string, RouterMiddleware[]> = {
     return json({ users: profiles.length, workspaces: workspaces.length, pendingJobs: jobs.length, overdueJobs: overdue, failedJobs: failed.length, planDistribution: dist, engine, integrations: await integrationStatus() });
   }),
   'GET /api/admin/workspaces': ADM(async () => {
-    const workspaces = (await listRecs(T.workspaces, 300)).filter((w) => !w.deletedAt);
-    const list: Rec[] = [];
-    for (const w of workspaces) {
-      const [profile, member] = await Promise.all([
-        w.ownerId ? getRec(T.profiles, w.ownerId) : Promise.resolve(null),
-        listRecs(T.members(w.id), 100).then((members) => members.find((item) => item.role === 'owner') || null),
-      ]);
-      list.push({ id: w.id, name: w.name, type: w.type, planId: w.planId || 'free', ownerId: w.ownerId || null, ownerName: w.ownerName || profile?.name || member?.name || null, ownerEmail: w.ownerEmail || profile?.email || member?.email || null, ownerStatus: w.ownerId ? 'active' : 'invited', createdAt: w.createdAt, storageBytes: w.storageBytes || 0, trial: w.trial || null });
-    }
+    const workspaces = (await listRecs(T.workspaces, 5000)).filter((w) => !w.deletedAt);
+    const ownerIds = [...new Set(workspaces.map((workspace) => workspace.ownerId).filter(Boolean))] as string[];
+    const profiles = ownerIds.length ? await db.get(T.profiles, ownerIds) : [];
+    const profileByOwner = new Map(ownerIds.map((id, index) => [id, profiles[index]]));
+    const list = workspaces.map((workspace) => {
+      const profile = workspace.ownerId ? profileByOwner.get(workspace.ownerId) : null;
+      return { id: workspace.id, name: workspace.name, type: workspace.type, planId: workspace.planId || 'free', ownerId: workspace.ownerId || null, ownerName: workspace.ownerName || profile?.name || null, ownerEmail: workspace.ownerEmail || profile?.email || null, ownerStatus: workspace.ownerId ? 'active' : 'invited', createdAt: workspace.createdAt, storageBytes: workspace.storageBytes || 0, trial: workspace.trial || null };
+    });
     return json({ workspaces: list });
   }),
   'POST /api/admin/workspaces': ADM(async (ctx) => {
@@ -878,7 +937,7 @@ const routes: Record<string, RouterMiddleware[]> = {
     const type = ['creator', 'business', 'agency', 'manager'].includes(b.type) ? b.type : 'business';
     const timezone = isValidTz(b.timezone) ? b.timezone : 'UTC';
     if (!name) return error('Give the organization a name.', 400);
-    if (!/^\S+@\S+\.\S+$/.test(ownerEmail)) return error('Enter a valid owner email address.', 400);
+    if (!/^\S+@\S+\.\S+$/.test(ownerEmail)) return error('Enter a valid organization admin email address.', 400);
     await ensurePlans();
     const planId = str(b.planId, 30) || 'free';
     const plan = await getRec(T.plans, planId);
@@ -898,7 +957,7 @@ const routes: Record<string, RouterMiddleware[]> = {
       await db.tx.add(T.inv(ownerEmail), [{ id, wsId: id, wsName: name, role: 'owner' }]);
     }
     await audit(ctx, id, 'admin.workspace_provisioned', { name, type, ownerEmail, planId });
-    return json({ workspace: { id, name, type, ownerEmail, ownerStatus: ownerId ? 'active' : 'invited', planId, planName: plan.name, createdAt }, ownerRegistered: !!ownerId, inviteDelivery: ownerId ? 'The owner can sign in with their existing account.' : 'Email delivery is not configured. Share the app URL and have the owner register with this email to claim the workspace.' }, 201);
+    return json({ workspace: { id, name, type, ownerEmail, ownerStatus: ownerId ? 'active' : 'invited', planId, planName: plan.name, createdAt }, ownerRegistered: !!ownerId, inviteDelivery: ownerId ? 'The organization admin can sign in with their existing account.' : 'Email delivery is not configured. Share the app URL and have the organization admin register with this email to claim the workspace.' }, 201);
   }),
   'PUT /api/admin/workspaces/:w': ADM(async (ctx) => {
     const planId = str(B(ctx).planId, 30);
@@ -925,7 +984,7 @@ const routes: Record<string, RouterMiddleware[]> = {
   }),
   'GET /api/admin/plans': ADM(async () => {
     await ensurePlans();
-    return json({ plans: (await listRecs(T.plans, 20)).sort((x, y) => x.sort - y.sort) });
+    return json({ plans: (await listRecs(T.plans, 20)).map(withUnlimitedTeam).sort((x, y) => x.sort - y.sort) });
   }),
   'PUT /api/admin/plans/:id': ADM(async (ctx) => {
     const b = B(ctx);

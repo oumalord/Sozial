@@ -11,7 +11,7 @@ const GROUPS: Record<string, string[]> = {
     draft: ['draft'],
     scheduled: ['scheduled', 'pending_approval', 'paused', 'publishing'],
     published: ['published', 'partial'],
-    failed: ['failed', 'needs_manual'],
+    failed: ['failed', 'needs_manual', 'partial'],
 };
 
 function List() {

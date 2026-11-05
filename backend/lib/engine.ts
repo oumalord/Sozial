@@ -3,7 +3,7 @@ import { T, getRec, addRec, patchRec, delRec, listRecs, uid, iso, planFor, getUs
 import type { Rec } from './core';
 import { PLATFORMS, composeText, mergeVariant, validateVariant } from './platforms';
 import type { MediaInfo, PlatformDef } from './platforms';
-import { providerKey, publishViaAyrshare } from './providers';
+import { listPostizPosts, postizConfig, publishViaPostiz } from './providers';
 import type { PublishResult } from './providers';
 
 const MAX_ATTEMPTS = 5;
@@ -105,15 +105,20 @@ async function runAdapter(ws: Rec, post: Rec, target: Rec): Promise<PublishResul
     const p: PlatformDef | undefined = PLATFORMS[target.platform];
     if (!p) return { ok: false, retryable: false, code: 'platform', message: 'Unknown platform.' };
     const variant = mergeVariant(post, p.id);
-    const media = await resolveMedia(ws.id, post.mediaIds || [], true);
+    const [media, thumbnailList] = await Promise.all([
+      resolveMedia(ws.id, post.mediaIds || [], true),
+      post.thumbnailMediaId ? resolveMedia(ws.id, [post.thumbnailMediaId], true) : Promise.resolve([]),
+    ]);
+    const thumbnail = thumbnailList[0];
     const blocking = validateVariant(p, variant, media).filter((i) => i.level === 'error');
     if (blocking.length) return { ok: false, retryable: false, code: 'validation', message: blocking.map((i) => i.message).join(' ') };
     if (acc.mode !== 'provider') return { ok: false, manual: true, retryable: false, code: 'manual', message: 'This account is in manual mode, so ' + p.name + ' must be published by hand.' };
-    const key = await providerKey();
-    if (!key) return { ok: false, retryable: false, code: 'provider_missing', message: 'No publishing provider is configured. An administrator must set AYRSHARE_API_KEY.' };
+    const config = await postizConfig();
+    if (!config) return { ok: false, retryable: false, code: 'provider_missing', message: 'Postiz is not configured. A SozialFlow administrator must set POSTIZ_API_URL and POSTIZ_API_KEY.' };
+    if (!acc.providerIntegrationId || !acc.providerIdentifier) return { ok: false, retryable: false, code: 'account', message: 'A SozialFlow administrator must assign this Postiz channel before publishing.' };
     const state = acc.connection && acc.connection.state;
-    if (state === 'expired' || state === 'permission_required') return { ok: false, retryable: false, code: 'auth', message: 'The connection for this account needs attention: ' + (acc.connection.message || state) };
-    return await publishViaAyrshare(key, { platform: p, variant, media, text: composeText(variant), idempotencyKey: target.id });
+    if (state !== 'connected') return { ok: false, retryable: false, code: 'account', message: 'Verify the social connection before scheduling automatic publishing.' };
+    return await publishViaPostiz(config, { platform: p, providerIdentifier: acc.providerIdentifier, integrationId: acc.providerIntegrationId, variant, media, thumbnail, text: composeText(variant), idempotencyKey: target.id });
   } catch (e) {
     return { ok: false, retryable: true, code: 'exception', message: e instanceof Error ? e.message : 'Unexpected error' };
   }
@@ -151,6 +156,12 @@ export async function processJob(job: Rec): Promise<void> {
   const res = await runAdapter(ws, post, target);
   const label = (post.title || String(post.caption || '').slice(0, 50) || 'Untitled post') + ' on ' + target.platform;
   await logEvent(w, { postId: post.id, targetId: target.id, platform: target.platform, attempt, level: res.ok ? 'info' : 'error', message: res.message, code: res.code || 'ok' });
+  if (res.ok && res.accepted && res.externalId) {
+    await mutatePost(w, post.id, (p) => ({ targets: p.targets.map((t: Rec) => (t.id === target.id ? { ...t, status: 'publishing', externalId: res.externalId, error: null, postizAcceptedAt: iso() } : t)) }));
+    await db.tx.add(T.postizPublishes, [{ id: res.externalId, wsId: w, postId: post.id, targetId: target.id, createdAt: iso() }]);
+    await delRec(T.jobs, [job.id]);
+    return;
+  }
   if (res.ok) {
     await mutatePost(w, post.id, (p) => ({ targets: p.targets.map((t: Rec) => (t.id === target.id ? { ...t, status: 'published', publishedAt: iso(), externalId: res.externalId, externalUrl: res.url, error: null, confirmedBy: 'platform' } : t)) }));
     await delRec(T.jobs, [job.id]);
@@ -176,6 +187,44 @@ export async function processJob(job: Rec): Promise<void> {
   if (res.code === 'auth') {
     await patchRec(T.accounts(w), target.accountId, { connection: { state: 'expired', message: res.message, checkedAt: iso() } });
     await notify(w, { type: 'expired', level: 'warn', title: 'Connection needs attention', body: target.platform + ' account: ' + res.message });
+  }
+}
+
+async function syncPostizPublishes(): Promise<void> {
+  const waiting = await listRecs(T.postizPublishes, 500);
+  if (!waiting.length) return;
+  const config = await postizConfig();
+  if (!config) return;
+  try {
+    const from = iso(Date.now() - 7 * DAY);
+    const to = iso(Date.now() + DAY);
+    const posts = await listPostizPosts(config, from, to);
+    const byId = new Map(posts.map((post) => [String(post.id || post.postId || ''), post]));
+    for (const entry of waiting) {
+      const postizPost = byId.get(entry.id);
+      if (!postizPost) continue;
+      const state = String(postizPost.state || '').toUpperCase();
+      if (state !== 'PUBLISHED' && state !== 'ERROR') continue;
+      const post = await getRec(T.posts(entry.wsId), entry.postId);
+      const target = post && (post.targets || []).find((item: Rec) => item.id === entry.targetId);
+      if (!post || !target || target.externalId !== entry.id) {
+        await delRec(T.postizPublishes, [entry.id]);
+        continue;
+      }
+      const label = (post.title || String(post.caption || '').slice(0, 50) || 'Untitled post') + ' on ' + target.platform;
+      if (state === 'PUBLISHED') {
+        await mutatePost(entry.wsId, post.id, (current) => ({ targets: current.targets.map((item: Rec) => item.id === entry.targetId ? { ...item, status: 'published', publishedAt: postizPost.publishDate || iso(), externalUrl: postizPost.releaseURL || null, error: null, confirmedBy: 'postiz' } : item) }));
+        await notify(entry.wsId, { type: 'published', title: 'Published', body: label, postId: post.id });
+      } else {
+        const message = String(postizPost.error || 'Postiz could not publish this post.').slice(0, 500);
+        await mutatePost(entry.wsId, post.id, (current) => ({ targets: current.targets.map((item: Rec) => item.id === entry.targetId ? { ...item, status: 'failed', failedAt: iso(), error: message } : item) }));
+        await db.tx.add(T.jobsFailed, [{ id: entry.targetId, wsId: entry.wsId, postId: post.id, platform: target.platform, error: message, code: 'postiz_publish', at: iso() }]);
+        await notify(entry.wsId, { type: 'failed', level: 'error', title: 'Publishing failed', body: label + ': ' + message, postId: post.id });
+      }
+      await delRec(T.postizPublishes, [entry.id]);
+    }
+  } catch (e) {
+    console.error('Postiz status sync failed', e instanceof Error ? e.message : e);
   }
 }
 
@@ -209,6 +258,7 @@ export async function processDue(opts: { postId?: string } = {}): Promise<{ pend
     }
   }
   await pool(due, 5, processJob);
+  await syncPostizPublishes();
   return { pending: jobs.length, due: due.length };
 }
 

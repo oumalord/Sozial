@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Check } from 'lucide-react';
 import * as A from '../lib/api';
 import { useApp } from '../lib/store';
 import { Button, Field, Toggle, cx } from '../lib/ui';
@@ -9,7 +8,7 @@ const TYPES: [string, string, string][] = [['creator', 'Content creator', 'Grow 
 const STEPS = ['Workspace', 'Account type', 'Accounts', 'Time zone', 'Frequency', 'Notifications', 'Finish'];
 
 export default function Onboarding() {
-    const { ws, meta, refresh, toast, profile, isAdmin } = useApp();
+    const { ws, refresh, toast, profile, isAdmin, user, signOut } = useApp();
     const [step, setStep] = useState(ws ? 3 : 1);
     const [name, setName] = useState('');
     const [type, setType] = useState('creator');
@@ -17,11 +16,20 @@ export default function Onboarding() {
     const [freq, setFreq] = useState(3);
     const [days, setDays] = useState<number[]>([1, 3, 5]);
     const [prefs, setPrefs] = useState<any>(profile.prefs);
-    const [acc, setAcc] = useState({ platform: 'instagram', handle: '', mode: 'manual' });
-    const [added, setAdded] = useState<string[]>([]);
     const [busy, setBusy] = useState(false);
-    const P: Record<string, any> = meta.platforms;
     const w: any = ws;
+
+    if (!ws && !isAdmin) return (
+        <div className='auth-screen flex min-h-full items-center justify-center p-5'>
+            <div className='auth-panel w-full max-w-md p-6 text-center sm:p-8'>
+                <div className='mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-brand text-lg font-extrabold text-white'>S<span className='text-accent'>.</span></div>
+                <h1 className='font-[Manrope] text-xl font-bold'>You’re waiting for organization access</h1>
+                <p className='mt-3 text-sm leading-relaxed text-muted'>Your Sozial account is signed in, but it is not attached to an organization yet. Ask your organization admin or Sozial superadmin to invite this email.</p>
+                <p className='mt-3 rounded-lg bg-surface2 p-3 text-xs font-medium'>{user.email}</p>
+                <Button variant='secondary' className='mt-5 !rounded-lg' onClick={signOut}>Sign out</Button>
+            </div>
+        </div>
+    );
 
     const wrap = async (fn: () => Promise<any>, next = step + 1) => {
         setBusy(true);
@@ -84,20 +92,9 @@ export default function Onboarding() {
                 )}
                 {step === 3 && (
                     <>
-                        <h2 className='text-xl font-semibold'>Add your social accounts</h2>
-                        <p className='mb-4 mt-1 text-sm text-muted'>Optional. You can add or change these any time in Social Accounts.</p>
-                        <div className='grid gap-3'>
-                            <div className='grid grid-cols-2 gap-2'>
-                                <select className='input' value={acc.platform} onChange={(e) => setAcc({ ...acc, platform: e.target.value })}>{Object.values<any>(P).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-                                <input className='input' placeholder='@handle' value={acc.handle} onChange={(e) => setAcc({ ...acc, handle: e.target.value })} />
-                            </div>
-                            <select className='input' value={acc.mode} onChange={(e) => setAcc({ ...acc, mode: e.target.value })}>
-                                <option value='manual'>Manual mode (you publish by hand)</option>
-                                <option value='provider'>Automatic via publishing provider</option>
-                            </select>
-                            <Button variant='secondary' loading={busy} disabled={!acc.handle.trim()} onClick={() => wrap(async () => { await A.post('/api/w/' + w.id + '/accounts', acc); setAdded([...added, P[acc.platform].name + ' ' + acc.handle]); setAcc({ ...acc, handle: '' }); }, 3)}>Add account</Button>
-                            {added.map((a) => <div key={a} className='flex items-center gap-2 text-sm'><Check size={14} className='text-ok' />{a}</div>)}
-                        </div>
+                        <h2 className='text-xl font-semibold'>Social channels</h2>
+                        <p className='mt-1 text-sm text-muted'>SocialFlow administrators connect accounts in Postiz and assign the channels your workspace can publish to.</p>
+                        <div className='mt-4 rounded-xl border border-line bg-surface2/60 p-4 text-sm leading-relaxed text-muted'>{isAdmin ? 'Finish setup first. Then connect channels in Postiz and assign them to each customer from Social Accounts.' : 'Your assigned channels will appear in the composer as soon as a Sozial administrator connects and assigns them. You do not need a Postiz account.'}</div>
                         <div className='mt-6 flex justify-between'><Button variant='ghost' onClick={() => setStep(4)}>Skip for now</Button><Button onClick={() => setStep(4)}>Continue</Button></div>
                     </>
                 )}

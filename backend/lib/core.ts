@@ -30,6 +30,8 @@ export const T = {
   evergreen: 'evergreen_idx',
   audit: 'audit_log',
   system: 'system_settings',
+  postizAssignments: 'postiz_assignments',
+  postizPublishes: 'postiz_publishes',
   mem: (u: string): string => 'mem_' + tkey(u),
   inv: (email: string): string => 'inv_' + ekey(email),
   members: wt('members'),
@@ -77,7 +79,7 @@ export async function listRecs(table: string, max: number = 200): Promise<Rec[]>
   const out: Rec[] = [];
   let nextToken: string | undefined;
   try {
-    for (let i = 0; i < 6 && out.length < max; i++) {
+    for (let i = 0; i < Math.min(50, Math.ceil(max / 100)) && out.length < max; i++) {
       const page = await db.list(table, { limit: Math.min(100, max - out.length), nextToken });
       out.push(...page.items);
       nextToken = page.nextToken;
@@ -118,19 +120,19 @@ export const can = (role: string, perm: string): boolean => (PERMS[perm] || []).
 const trial = 14;
 export const DEFAULT_PLANS: Rec[] = [
   { id: 'free', name: 'Free', sort: 0, active: true, priceMonthly: 0, priceYearly: 0, currency: 'USD', trialDays: 0,
-    limits: { accounts: 3, scheduledPerMonth: 15, members: 1, storageMb: 100, aiCredits: 0 },
-    features: { ai: false, bulk: false, evergreen: false, advancedAnalytics: false, exports: false, team: false, approvals: false, multiWorkspace: false, whiteLabel: false } },
+    limits: { accounts: 3, scheduledPerMonth: 15, members: null, storageMb: 100, aiCredits: 0 },
+    features: { ai: false, bulk: false, evergreen: false, advancedAnalytics: false, exports: false, team: true, approvals: false, multiWorkspace: false, whiteLabel: false } },
   { id: 'creator', name: 'Creator', sort: 1, active: true, priceMonthly: 12, priceYearly: 120, currency: 'USD', trialDays: trial,
-    limits: { accounts: 6, scheduledPerMonth: 120, members: 1, storageMb: 2000, aiCredits: 100 },
-    features: { ai: true, bulk: false, evergreen: false, advancedAnalytics: false, exports: false, team: false, approvals: false, multiWorkspace: false, whiteLabel: false } },
+    limits: { accounts: 6, scheduledPerMonth: 120, members: null, storageMb: 2000, aiCredits: 100 },
+    features: { ai: true, bulk: false, evergreen: false, advancedAnalytics: false, exports: false, team: true, approvals: false, multiWorkspace: false, whiteLabel: false } },
   { id: 'pro', name: 'Pro', sort: 2, active: true, priceMonthly: 29, priceYearly: 290, currency: 'USD', trialDays: trial,
-    limits: { accounts: 12, scheduledPerMonth: 600, members: 1, storageMb: 10000, aiCredits: 500 },
-    features: { ai: true, bulk: true, evergreen: true, advancedAnalytics: true, exports: true, team: false, approvals: false, multiWorkspace: false, whiteLabel: false } },
+    limits: { accounts: 12, scheduledPerMonth: 600, members: null, storageMb: 10000, aiCredits: 500 },
+    features: { ai: true, bulk: true, evergreen: true, advancedAnalytics: true, exports: true, team: true, approvals: false, multiWorkspace: false, whiteLabel: false } },
   { id: 'business', name: 'Business', sort: 3, active: true, priceMonthly: 79, priceYearly: 790, currency: 'USD', trialDays: trial,
-    limits: { accounts: 30, scheduledPerMonth: 2500, members: 10, storageMb: 50000, aiCredits: 1500 },
+    limits: { accounts: 30, scheduledPerMonth: 2500, members: null, storageMb: 50000, aiCredits: 1500 },
     features: { ai: true, bulk: true, evergreen: true, advancedAnalytics: true, exports: true, team: true, approvals: true, multiWorkspace: false, whiteLabel: false } },
   { id: 'agency', name: 'Agency', sort: 4, active: true, priceMonthly: 199, priceYearly: 1990, currency: 'USD', trialDays: trial,
-    limits: { accounts: 100, scheduledPerMonth: 10000, members: 50, storageMb: 200000, aiCredits: 5000 },
+    limits: { accounts: 100, scheduledPerMonth: 10000, members: null, storageMb: 200000, aiCredits: 5000 },
     features: { ai: true, bulk: true, evergreen: true, advancedAnalytics: true, exports: true, team: true, approvals: true, multiWorkspace: true, whiteLabel: true } },
 ];
 
@@ -146,7 +148,12 @@ export async function planFor(ws: Rec): Promise<Rec> {
   await ensurePlans();
   const trialOn = ws.trial && Date.parse(ws.trial.endsAt) > Date.now();
   const id: string = trialOn ? ws.trial.planId : ws.planId || 'free';
-  return (await getRec(T.plans, id)) ?? (await getRec(T.plans, 'free')) ?? DEFAULT_PLANS[0];
+  const plan = (await getRec(T.plans, id)) ?? (await getRec(T.plans, 'free')) ?? DEFAULT_PLANS[0];
+  return { ...plan, limits: { ...plan.limits, members: null }, features: { ...plan.features, team: true } };
+}
+
+export function withUnlimitedTeam(plan: Rec): Rec {
+  return { ...plan, limits: { ...plan.limits, members: null }, features: { ...plan.features, team: true } };
 }
 
 export function needFeature(plan: Rec, key: string): RouterResponse | null {

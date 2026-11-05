@@ -1,19 +1,19 @@
 import { useState } from 'react';
-import { Plus, RefreshCw, Trash2, ChevronDown } from 'lucide-react';
+import { Plus, RefreshCw, Trash2, ChevronDown, ExternalLink } from 'lucide-react';
 import * as A from '../lib/api';
 import { useLoad, useWs } from '../lib/hooks';
 import { Badge, Button, Card, ConnBadge, Empty, Field, Modal, PageHeader, PlatformChip, Spinner } from '../lib/ui';
 
-function AddAccount({ onClose, onDone, brands }: { onClose: () => void; onDone: () => void; brands: any[] }) {
-    const { ws, meta, toast } = useWs();
-    const P: Record<string, any> = meta.platforms;
-    const [f, setF] = useState({ platform: 'instagram', handle: '', displayName: '', mode: 'manual', brandId: brands[0]?.id || 'main' });
+function AddAccount({ onClose, onDone, brands, integrations }: { onClose: () => void; onDone: () => void; brands: any[]; integrations: any[] }) {
+    const { ws, toast } = useWs();
+    const available = integrations.filter((integration) => !integration.assigned && !integration.disabled);
+    const [f, setF] = useState({ postizIntegrationId: available[0]?.id || '', brandId: brands[0]?.id || 'main' });
     const [busy, setBusy] = useState(false);
     const save = async () => {
         setBusy(true);
         try {
             await A.post('/api/w/' + ws.id + '/accounts', f);
-            toast('Account added');
+            toast('Postiz channel assigned to this workspace');
             onDone();
             onClose();
         } catch (e: any) {
@@ -23,35 +23,22 @@ function AddAccount({ onClose, onDone, brands }: { onClose: () => void; onDone: 
         }
     };
     return (
-        <Modal title='Add a social account' onClose={onClose}>
+        <Modal title='Assign a Postiz channel' onClose={onClose}>
             <div className='space-y-3'>
-                <Field label='Platform'>
-                    <select className='input' value={f.platform} onChange={(e) => setF({ ...f, platform: e.target.value })}>
-                        {Object.values<any>(P).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                <Field label='Connected channel'>
+                    <select className='input' value={f.postizIntegrationId} onChange={(e) => setF({ ...f, postizIntegrationId: e.target.value })}>
+                        {available.map((integration) => <option key={integration.id} value={integration.id}>{integration.name} · {integration.platform}{integration.profile ? ' · ' + integration.profile : ''}</option>)}
                     </select>
                 </Field>
-                <Field label='Handle or page name'><input className='input' value={f.handle} onChange={(e) => setF({ ...f, handle: e.target.value })} placeholder='@yourbrand' /></Field>
-                <Field label='Display name (optional)'><input className='input' value={f.displayName} onChange={(e) => setF({ ...f, displayName: e.target.value })} /></Field>
                 <Field label='Brand'>
                     <select className='input' value={f.brandId} onChange={(e) => setF({ ...f, brandId: e.target.value })}>
                         {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                     </select>
                 </Field>
-                <div>
-                    <span className='label'>How should posts be published?</span>
-                    <div className='grid gap-2'>
-                        {[['manual', 'Manual mode', 'SocialFlow schedules and reminds you. You publish by hand and confirm.'], ['provider', 'Automatic via publishing provider', 'Requires an Ayrshare key set by an administrator and this network linked there.']].map(([v, t, d]) => (
-                            <label key={v} className={'flex cursor-pointer gap-3 rounded-xl border p-3 ' + (f.mode === v ? 'border-brand bg-brand/5' : 'border-line')}>
-                                <input type='radio' checked={f.mode === v} onChange={() => setF({ ...f, mode: v })} />
-                                <span><span className='block text-sm font-medium'>{t}</span><span className='text-xs text-muted'>{d}</span></span>
-                            </label>
-                        ))}
-                    </div>
-                </div>
-                <p className='text-[11px] text-muted'>Direct OAuth sign-in to each network needs each platform's developer approval. Until then, accounts are linked through the publishing provider.</p>
+                <p className='text-[11px] text-muted'>SocialFlow customers will see this channel in their workspace but will not have access to Postiz.</p>
                 <div className='flex justify-end gap-2 pt-2'>
                     <Button variant='secondary' onClick={onClose}>Cancel</Button>
-                    <Button loading={busy} onClick={save} disabled={!f.handle.trim()}>Add account</Button>
+                    <Button loading={busy} onClick={save} disabled={!f.postizIntegrationId}>Assign channel</Button>
                 </div>
             </div>
         </Modal>
@@ -59,15 +46,22 @@ function AddAccount({ onClose, onDone, brands }: { onClose: () => void; onDone: 
 }
 
 export default function Accounts() {
-    const { ws, meta, can, toast, ask } = useWs();
+    const { ws, meta, isAdmin, toast, ask } = useWs();
     const P: Record<string, any> = meta.platforms;
-    const { data, loading, reload } = useLoad(async () => ({ acc: await A.get('/api/w/' + ws.id + '/accounts'), brands: await A.get('/api/w/' + ws.id + '/brands') }), [ws.id]);
+    const { data, loading, reload } = useLoad(async () => {
+        const [acc, brandData, postiz] = await Promise.all([
+            A.get('/api/w/' + ws.id + '/accounts'),
+            A.get('/api/w/' + ws.id + '/brands'),
+            isAdmin ? A.get('/api/admin/postiz/integrations?workspace=' + encodeURIComponent(ws.id)).catch((error: any) => ({ integrations: [], dashboardUrl: '', error: error.message })) : Promise.resolve({ integrations: [], dashboardUrl: '' }),
+        ]);
+        return { acc, brands: brandData, postiz };
+    }, [ws.id, isAdmin]);
     const [adding, setAdding] = useState(false);
     const [guide, setGuide] = useState(false);
     const [brandName, setBrandName] = useState('');
     const [busy, setBusy] = useState('');
-    const manage = can('accounts.manage');
-    const provider = (meta.providers || []).find((p: any) => p.id === 'ayrshare');
+    const manage = isAdmin;
+    const provider = (meta.providers || []).find((p: any) => p.id === 'postiz');
     const verify = async (id: string) => {
         setBusy(id);
         try {
@@ -98,17 +92,19 @@ export default function Accounts() {
     if (loading && !data) return <Spinner />;
     const accounts: any[] = data?.acc.accounts || [];
     const brands: any[] = data?.brands.brands || [];
+    const integrations: any[] = data?.postiz.integrations || [];
     return (
         <div className='fade-in'>
-            <PageHeader title='Social Accounts' subtitle={accounts.length + ' of ' + (data?.acc.limit ?? '-') + ' accounts used on the ' + ws.plan.name + ' plan'} actions={manage && <Button onClick={() => setAdding(true)}><Plus size={16} />Add account</Button>} />
+            <PageHeader title='Social Accounts' subtitle={accounts.length + ' channel' + (accounts.length === 1 ? '' : 's') + ' assigned to this workspace'} actions={manage && <div className='flex flex-wrap gap-2'>{data?.postiz.dashboardUrl && <a className='inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium hover:bg-surface2' href={data.postiz.dashboardUrl} target='_blank' rel='noreferrer'><ExternalLink size={14} />Open Postiz</a>}<Button variant='secondary' onClick={reload}><RefreshCw size={14} />Refresh channels</Button><Button onClick={() => setAdding(true)} disabled={!provider?.configured || !integrations.some((integration) => !integration.assigned && !integration.disabled)}><Plus size={16} />Assign channel</Button></div>} />
             {provider && !provider.configured && (
                 <Card className='mb-4 border-warn/50 bg-warn/5 p-4 text-sm'>
-                    <div className='font-semibold'>Automatic publishing is not active</div>
-                    <p className='mt-1 text-muted'>No publishing provider key is configured, so accounts cannot publish on their own. Posts for manual accounts will be queued and flagged for manual publishing. The administrator can add the AYRSHARE_API_KEY secret to turn automation on.</p>
+                    <div className='font-semibold'>Postiz is not connected</div>
+                    <p className='mt-1 text-muted'>A Sozial administrator must configure POSTIZ_API_URL and POSTIZ_API_KEY on the server. Customers can schedule content after a channel is assigned to this workspace.</p>
                 </Card>
             )}
+            {manage && provider?.configured && <Card className='mb-4 border-brand/20 bg-brand/5 p-4 text-sm'><div className='font-semibold'>Administrator channel setup</div><p className='mt-1 text-muted'>Connect channels in the private Postiz dashboard, then refresh this list and assign each channel to its customer workspace. A Postiz channel can be assigned to only one workspace.</p></Card>}
             {accounts.length === 0 ? (
-                <Card><Empty title='No accounts yet' text='Add the pages and profiles you publish to. Each is listed with its true connection state.' action={manage ? <Button onClick={() => setAdding(true)}>Add your first account</Button> : undefined} /></Card>
+                <Card><Empty title='No channels assigned' text={manage ? 'Connect a social account in Postiz, refresh this page, then assign it to this workspace.' : 'A Sozial administrator will assign your connected social channels here.'} action={manage && provider?.configured && integrations.some((integration) => !integration.assigned && !integration.disabled) ? <Button onClick={() => setAdding(true)}>Assign a channel</Button> : undefined} /></Card>
             ) : (
                 <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>
                     {accounts.map((a) => (
@@ -127,7 +123,7 @@ export default function Accounts() {
                             </div>
                             {manage && (
                                 <div className='mt-3 flex justify-end gap-2'>
-                                    {a.mode === 'provider' && <Button size='sm' variant='secondary' loading={busy === a.id} onClick={() => verify(a.id)}><RefreshCw size={13} />Verify</Button>}
+                                    {a.postizAssigned && <Button size='sm' variant='secondary' loading={busy === a.id} onClick={() => verify(a.id)}><RefreshCw size={13} />Verify Postiz channel</Button>}
                                     <Button size='sm' variant='ghost' onClick={() => remove(a)}><Trash2 size={13} />Remove</Button>
                                 </div>
                             )}
@@ -177,7 +173,7 @@ export default function Accounts() {
                     </div>
                 )}
             </Card>
-            {adding && <AddAccount brands={brands} onClose={() => setAdding(false)} onDone={reload} />}
+            {adding && <AddAccount brands={brands} integrations={integrations} onClose={() => setAdding(false)} onDone={reload} />}
         </div>
     );
 }

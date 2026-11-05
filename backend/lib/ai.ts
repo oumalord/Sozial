@@ -2,7 +2,7 @@ import { ai } from './runtime';
 import type { Rec } from './core';
 import { PLATFORMS } from './platforms';
 
-const SYSTEM = 'You are SocialFlow, a social media copywriting assistant. Be concrete and concise. Never invent statistics, audience facts, or details of a video or image you were not given. Respect platform character limits exactly. Write hashtags without the # symbol.';
+const SYSTEM = 'You are SozialFlow, a social media copywriting assistant. Be concrete and concise. Never invent statistics, audience facts, or details of a video or image you were not given. Respect platform character limits exactly. Write hashtags without the # symbol.';
 
 const obj = (props: Rec, required: string[]): Rec => ({ type: 'object', properties: props, required });
 const arr = (items: Rec): Rec => ({ type: 'array', items });
@@ -26,7 +26,11 @@ export async function runAi(b: Rec, stats: Rec | null): Promise<Rec> {
       schema = obj({ captions: arr(S) }, ['captions']);
       break;
     case 'hashtags':
-      prompt = 'Suggest 12 relevant hashtags for ' + plat(b.platform) + '. Topic: ' + topic + '. Audience: ' + audience + '. Mix broad and niche tags.';
+      {
+        const platform = PLATFORMS[String(b.platform)];
+        const count = platform?.hashtagMax ? Math.min(platform.hashtagMax, 8) : 8;
+        prompt = 'Suggest up to ' + count + ' specific, relevant hashtags for ' + plat(b.platform) + '. Topic: ' + topic + '. Audience: ' + audience + '. Prefer a useful mix of niche and discoverable tags; avoid unrelated trends, spam, and generic engagement bait. Do not promise reach or virality. Return tags without #.';
+      }
       schema = obj({ hashtags: arr(S) }, ['hashtags']);
       break;
     case 'rewrite':

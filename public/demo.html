@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101d35">
-  <title>SocialFlow | Product Demo</title>
+  <title>Sozial | Product Demo</title>
   <style>
     :root { color-scheme: dark; --ink: #f5f8ff; --muted: #a4b2c8; --line: #2b3b56; --panel: #182942; --blue: #4a94ff; --mint: #65cfad; --gold: #efbd68; }
     * { box-sizing: border-box; }
@@ -68,24 +68,24 @@
 <body>
   <div class="progress" id="progress"></div>
   <div class="deck">
-    <header><div class="brand"><span class="mark">S.</span><span>SocialFlow</span></div><div class="pill">Product walkthrough <span aria-hidden="true">·</span> 4 minutes</div></header>
+    <header><div class="brand"><span class="mark">S.</span><span>Sozial</span></div><div class="pill">Product walkthrough <span aria-hidden="true">·</span> 4 minutes</div></header>
     <main class="stage" aria-live="polite">
       <section class="slide active">
         <div class="eyebrow">Social publishing, organized</div>
         <h1>One workspace.<br><span class="accent">Every channel.</span></h1>
-        <p class="lead">SocialFlow helps organizations plan, coordinate, and publish social content from one clear operating space.</p>
+        <p class="lead">Sozial helps organizations plan, coordinate, and publish social content from one clear operating space.</p>
         <div class="mock"><div class="mock-top"><span class="mock-dot"></span> Northstar Studio <span style="margin-left:auto;color:#71819a">Workspace overview</span></div><div class="mock-body"><div class="mock-side">Overview<br>Publishing calendar<br>Content studio<br>Media library<br>Social accounts</div><div class="mock-main"><strong style="font-size:14px">Good morning, Maya</strong><div class="mock-cards" style="margin-top:14px"><div class="mock-card">Connected channels<div class="mock-bar"></div></div><div class="mock-card">Scheduled posts<div class="mock-bar" style="background:linear-gradient(90deg,#65cfad 48%,#e8edf5 48%)"></div></div><div class="mock-card">Publishing health<div class="mock-bar" style="background:linear-gradient(90deg,#efbd68 72%,#e8edf5 72%)"></div></div></div></div></div></div>
       </section>
       <section class="slide">
         <div class="eyebrow">Built for teams and agencies</div><h2>Start with the organization.<br><span class="accent">Grow into the workflow.</span></h2>
-        <p class="lead">Each business, brand, or client gets its own workspace, owner, settings, channels, content, and team.</p>
-        <div class="slide-grid"><article class="tile"><h3>Organization workspace</h3><p>A dedicated home for a company, agency client, creator, or social media team.</p></article><article class="tile"><h3>Clear ownership</h3><p>The organization owner signs in with their own account. Superadmins never set or share their password.</p></article><article class="tile"><h3>Independent studios</h3><p>Each workspace can onboard channels, create content, organize media, and plan its own calendar.</p></article></div>
+        <p class="lead">Each business, brand, creator, or client gets its own workspace, organization admin, settings, channels, content, and team.</p>
+        <div class="slide-grid"><article class="tile"><h3>Organization workspace</h3><p>A dedicated home for a company, agency client, creator, or social media team.</p></article><article class="tile"><h3>One primary admin</h3><p>The organization admin signs in with their own account. Superadmins never set or share their password.</p></article><article class="tile"><h3>Independent studios</h3><p>Each workspace can onboard channels, create content, organize media, and plan its own calendar.</p></article></div>
       </section>
       <section class="slide">
         <div class="eyebrow">Superadmin provisioning</div><h2>Provision a tenant<br><span class="accent">in one pass.</span></h2>
-        <div class="step"><div class="num">01</div><div><h3>Create the organization</h3><p>Enter the business or client name, organization type, owner contact, and starting plan.</p></div></div>
-        <div class="step"><div class="num">02</div><div><h3>Assign the owner</h3><p>Existing accounts receive owner access immediately. New owners are invited by email address and claim the workspace when they register.</p></div></div>
-        <div class="step"><div class="num">03</div><div><h3>Hand off the studio</h3><p>Share the app URL. The owner completes onboarding and begins configuring their organization’s studio.</p></div></div>
+        <div class="step"><div class="num">01</div><div><h3>Create the organization</h3><p>Enter the business or client name, organization type, primary admin contact, and starting plan.</p></div></div>
+        <div class="step"><div class="num">02</div><div><h3>Assign the organization admin</h3><p>Existing accounts receive admin access immediately. New admins claim the workspace when they register with the designated email.</p></div></div>
+        <div class="step"><div class="num">03</div><div><h3>Build the organization team</h3><p>The admin adds unlimited team accounts and assigns admin, manager, creator, editor, approver, or viewer responsibilities.</p></div></div>
       </section>
       <section class="slide">
         <div class="eyebrow">Content operations</div><h2>Move from idea<br>to <span class="accent">ready-to-publish.</span></h2>
@@ -99,17 +99,17 @@
       <section class="slide">
         <div class="eyebrow">Live demo path</div><h2>Four minutes to show<br><span class="accent">the complete handoff.</span></h2>
         <div class="step"><div class="num">1</div><div><h3>Open the superadmin console</h3><p>Show the organization list, registered-user count, and tenant provisioning action.</p></div></div>
-        <div class="step"><div class="num">2</div><div><h3>Provision a sample organization</h3><p>Create a business workspace, assign an owner email, and choose a plan. Explain that passwords are never set by the admin.</p></div></div>
+        <div class="step"><div class="num">2</div><div><h3>Provision a sample organization</h3><p>Create a business workspace, assign its organization admin, and choose a plan. Explain that passwords are never set by the superadmin.</p></div></div>
         <div class="step"><div class="num">3</div><div><h3>Switch to the owner handoff</h3><p>Show the invitation state and explain that the owner registers with the invited email to claim the workspace.</p></div></div>
         <div class="step"><div class="num">4</div><div><h3>Walk the studio</h3><p>Complete onboarding, connect a channel, open the content studio, and place a draft on the calendar.</p></div></div>
       </section>
       <section class="slide">
         <div class="eyebrow">Platform foundation</div><h2>Ready to operate<br><span class="accent">on Vercel + Neon.</span></h2>
-        <p class="lead">Vercel serves the app and scheduled publishing jobs. Neon stores tenant and workflow records. Vercel Blob stores shared media assets.</p>
+        <p class="lead">Vercel serves the app, GitHub Actions runs scheduled publishing jobs, Neon stores tenant and workflow records, and Vercel Blob stores media assets.</p>
         <div class="slide-grid"><article class="tile"><h3>Tenant-aware access</h3><p>Workspace membership and role checks guard organization data and actions.</p></article><article class="tile"><h3>Operational visibility</h3><p>Superadmins can review tenants, plans, system health, failed jobs, and audit activity.</p></article><article class="tile"><h3>Owner-controlled accounts</h3><p>Registration and session creation stay with each user; no temporary admin passwords are exposed.</p></article></div>
       </section>
       <section class="slide">
-        <div class="eyebrow">SocialFlow</div><h2>Give every team<br><span class="accent">a place to publish.</span></h2>
+        <div class="eyebrow">Sozial</div><h2>Give every team<br><span class="accent">a place to publish.</span></h2>
         <p class="lead">Provision the organization. Let its owner build the studio. Keep every channel, plan, and publishing workflow in one place.</p>
         <p class="end-note">Use the arrow keys or the controls below to navigate. Press Home to return to the title slide, or End to jump to the close.</p>
       </section>

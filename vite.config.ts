@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import type { Plugin, ViteDevServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { loadEnv } from 'vite';
+import { VitePWA } from 'vite-plugin-pwa';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { handler } from './backend';
 
@@ -57,5 +58,28 @@ export default defineConfig(({ mode }) => {
 	for (const [key, value] of Object.entries(loadEnv(mode, process.cwd(), ''))) {
 		if (process.env[key] === undefined) process.env[key] = value;
 	}
-	return { plugins: [react(), localApi()], base: './' };
+	return {
+		plugins: [react(), localApi(), VitePWA({
+			registerType: 'autoUpdate',
+			injectRegister: null,
+			includeAssets: ['icon.svg'],
+			manifest: {
+				name: 'Sozial',
+				short_name: 'Sozial',
+				description: 'Plan, create, and publish social content across your channels.',
+				theme_color: '#101725',
+				background_color: '#101725',
+				display: 'standalone',
+				start_url: './',
+				scope: './',
+				icons: [{ src: './icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
+			},
+			workbox: {
+				navigateFallback: 'index.html',
+				navigateFallbackDenylist: [/^\/api\//],
+				globPatterns: ['**/*.{js,css,html,svg,woff,woff2,webmanifest}'],
+			},
+		})],
+		base: './',
+	};
 });

@@ -12,7 +12,7 @@ export default function Calendar() {
     const { ws, tz, meta, can, toast, ask } = useWs();
     const P: Record<string, any> = meta.platforms;
     const today = ymdInTz(Date.now(), tz);
-    const [view, setView] = useState('month');
+    const [view, setView] = useState('week');
     const [cursor, setCursor] = useState(today);
     const [fp, setFp] = useState('');
     const [fb, setFb] = useState('');
@@ -20,8 +20,8 @@ export default function Calendar() {
     const [sel, setSel] = useState<any>(null);
     const [moveTo, setMoveTo] = useState({ date: '', time: '' });
     const { data, loading, reload } = useLoad(async () => {
-        const [posts, accounts, brands] = await Promise.all([A.get('/api/w/' + ws.id + '/posts'), A.get('/api/w/' + ws.id + '/accounts'), A.get('/api/w/' + ws.id + '/brands')]);
-        return { posts: posts.posts as any[], accounts: accounts.accounts as any[], brands: brands.brands as any[] };
+        const [posts, accounts, brands, media] = await Promise.all([A.get('/api/w/' + ws.id + '/posts'), A.get('/api/w/' + ws.id + '/accounts'), A.get('/api/w/' + ws.id + '/brands'), A.get('/api/w/' + ws.id + '/media')]);
+        return { posts: posts.posts as any[], accounts: accounts.accounts as any[], brands: brands.brands as any[], media: media.items as any[] };
     }, [ws.id]);
     const canMove = can('post.schedule');
 
@@ -65,15 +65,26 @@ export default function Calendar() {
         }
     };
 
-    const chip = (i: any) => (
-        <button key={i.id} draggable={OPEN.includes(i.status) && canMove} onDragStart={(e) => e.dataTransfer.setData('text/plain', i.post.id + '|' + i.id)} onClick={(e) => { e.stopPropagation(); setSel(i); setMoveTo({ date: ymdInTz(Date.parse(i.scheduledAt), tz), time: hmInTz(Date.parse(i.scheduledAt), tz) }); }}
-            className='calendar-event' style={{ borderLeftColor: STATUS_COLOR[i.status] || '#94a3b8', backgroundColor: `color-mix(in srgb, ${P[i.platform]?.color || '#1b65e8'} 10%, rgb(var(--surface)))` }} title={i.title + ' (' + i.status + ')'}>
-            <span className='calendar-event-mark' style={{ backgroundColor: P[i.platform]?.color || '#1b65e8' }} />
-            <span className='calendar-event-time'>{hmInTz(Date.parse(i.at), tz)}</span>
-            <span className='min-w-0 flex-1 truncate'>{i.title}</span>
-            {i.status === 'published' && <CheckCircle2 size={11} className='shrink-0 text-ok' />}
-        </button>
-    );
+    const chip = (i: any) => {
+        const rich = view === 'week' || view === 'day';
+        const media = data?.media || [];
+        const coverId = i.post.thumbnailMediaId || (i.post.mediaIds || []).find((id: string) => media.some((item: any) => item.id === id && item.kind === 'image'));
+        const cover = media.find((item: any) => item.id === coverId && item.kind === 'image');
+        return <button key={i.id} draggable={OPEN.includes(i.status) && canMove} onDragStart={(e) => e.dataTransfer.setData('text/plain', i.post.id + '|' + i.id)} onClick={(e) => { e.stopPropagation(); setSel(i); setMoveTo({ date: ymdInTz(Date.parse(i.scheduledAt), tz), time: hmInTz(Date.parse(i.scheduledAt), tz) }); }}
+            className={cx('calendar-event', rich && 'calendar-event-rich')} style={{ borderLeftColor: STATUS_COLOR[i.status] || '#94a3b8', backgroundColor: `color-mix(in srgb, ${P[i.platform]?.color || '#1b65e8'} 10%, rgb(var(--surface)))` }} title={i.title + ' (' + i.status + ')'}>
+            {rich ? <>
+                <span className='calendar-event-rich-meta'><span className='flex min-w-0 items-center gap-1.5'><span className='calendar-event-mark' style={{ backgroundColor: P[i.platform]?.color || '#1b65e8' }} />{P[i.platform]?.name || i.platform}</span><span className='calendar-event-time'>{hmInTz(Date.parse(i.at), tz)}</span></span>
+                {cover?.url ? <img src={cover.url} alt={cover.name || ''} loading='lazy' className='calendar-event-cover' /> : <span className='calendar-event-placeholder'>{P[i.platform] && <PlatformChip p={P[i.platform]} size={24} />}</span>}
+                <span className='calendar-event-rich-title'>{i.title}</span>
+                <span className='calendar-event-rich-status'>{i.status === 'queued' ? 'Scheduled' : i.status === 'awaiting_approval' ? 'Needs approval' : i.status}</span>
+            </> : <>
+                <span className='calendar-event-mark' style={{ backgroundColor: P[i.platform]?.color || '#1b65e8' }} />
+                <span className='calendar-event-time'>{hmInTz(Date.parse(i.at), tz)}</span>
+                <span className='min-w-0 flex-1 truncate'>{i.title}</span>
+                {i.status === 'published' && <CheckCircle2 size={11} className='shrink-0 text-ok' />}
+            </>}
+        </button>;
+    };
 
     const cell = (ymd: string, inMonth = true, tall = false) => (
         <div key={ymd} onDragOver={(e) => e.preventDefault()} onDrop={(e) => drop(ymd, e)} className={cx('calendar-day group', tall && 'calendar-day-tall', !inMonth && 'calendar-day-outside', ymd === today && 'calendar-day-today')}>

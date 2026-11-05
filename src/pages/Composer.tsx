@@ -192,7 +192,18 @@ export default function Composer({ id, query }: { id: string; query: Record<stri
     const writable = can('post.write');
     const [post, setPost] = useState<any>(null);
     const [ready, setReady] = useState(isNew);
-    const [form, setForm] = useState<any>({ title: '', caption: '', hashtags: '', link: '', altText: '', mediaIds: [], variants: {}, brandId: '', thumbnailMediaId: '' });
+    const [form, setForm] = useState<any>(() => {
+        const empty = { title: '', caption: '', hashtags: '', link: '', altText: '', mediaIds: [], variants: {}, brandId: '', thumbnailMediaId: '' };
+        if (!isNew) return empty;
+        try {
+            const draft = sessionStorage.getItem('sf_ai_draft');
+            if (!draft) return empty;
+            sessionStorage.removeItem('sf_ai_draft');
+            return { ...empty, ...JSON.parse(draft) };
+        } catch {
+            return empty;
+        }
+    });
     const [sel, setSel] = useState<string[]>([]);
     const [tab, setTab] = useState('base');
     const [accounts, setAccounts] = useState<any[]>([]);
@@ -205,6 +216,7 @@ export default function Composer({ id, query }: { id: string; query: Record<stri
     const [perAcc, setPerAcc] = useState(false);
     const [times, setTimes] = useState<Record<string, { date: string; time: string }>>({});
     const [busy, setBusy] = useState('');
+    const [hashBusy, setHashBusy] = useState('');
     const [picker, setPicker] = useState(false);
     const [aiOpen, setAiOpen] = useState(false);
     const [suggest, setSuggest] = useState<any>(null);
@@ -290,6 +302,27 @@ export default function Composer({ id, query }: { id: string; query: Record<stri
         return { caption: v.caption || form.caption, title: v.title || form.title, link: v.link || form.link, tags, format: v.format || P[pid].formats[0].value, opts: v.opts || {} };
     };
     const setVar = (pid: string, patch: any) => setForm({ ...form, variants: { ...form.variants, [pid]: { ...(form.variants[pid] || {}), ...patch } } });
+    const suggestHashtags = async (pid: string) => {
+        const p = P[pid];
+        const variant = form.variants[pid] || {};
+        const topic = [variant.caption || form.caption, variant.title || form.title].filter(Boolean).join('\n');
+        if (!topic.trim()) {
+            toast('Add a caption or title before suggesting hashtags.', 'err');
+            return;
+        }
+        setHashBusy(pid);
+        try {
+            const response = await A.post('/api/w/' + ws.id + '/ai', { task: 'hashtags', topic, platform: pid });
+            const existing = tagsOf(variant.hashtagsText || form.hashtags);
+            const max = p.hashtagMax || Number.MAX_SAFE_INTEGER;
+            setVar(pid, { hashtagsText: Array.from(new Set(existing.concat(response.result.hashtags || []))).slice(0, max).join(' ') });
+            toast('Platform-specific hashtag suggestions added');
+        } catch (e: any) {
+            toast(e.message, 'err');
+        } finally {
+            setHashBusy('');
+        }
+    };
     const mediaObjs = form.mediaIds.map((m: string) => media.find((x) => x.id === m)).filter(Boolean);
     const needsApproval = role === 'creator' || (ws.plan.features.approvals && ws.approvalPolicy === 'everyone');
 
@@ -444,7 +477,7 @@ export default function Composer({ id, query }: { id: string; query: Record<stri
                                             {p.hasTitle && <Field label={'Title' + (p.titleRequired ? ' (required)' : '')}><input className='input' disabled={!writable} value={v.title || ''} placeholder={form.title} maxLength={p.titleMax || 200} onChange={(ev) => setVar(tab, { title: ev.target.value })} /></Field>}
                                             <Field label={p.captionLabel}><textarea className='input' rows={4} disabled={!writable} value={v.caption || ''} placeholder={form.caption} onChange={(ev) => setVar(tab, { caption: ev.target.value })} /></Field>
                                             <div className={cx('text-right text-[11px]', len > p.captionMax ? 'font-semibold text-bad' : 'text-muted')}>{len.toLocaleString()} / {p.captionMax.toLocaleString()}{p.hashtagMax ? ' · max ' + p.hashtagMax + ' hashtags' : ''}</div>
-                                            <Field label='Hashtags for this platform'><input className='input' disabled={!writable} value={v.hashtagsText || ''} placeholder={form.hashtags} onChange={(ev) => setVar(tab, { hashtagsText: ev.target.value })} /></Field>
+                                            <div className='flex items-end gap-2'><Field label='Hashtags for this platform'><input className='input' disabled={!writable} value={v.hashtagsText || ''} placeholder={form.hashtags} onChange={(ev) => setVar(tab, { hashtagsText: ev.target.value })} /></Field><Button size='sm' variant='secondary' loading={hashBusy === tab} disabled={!writable || hashBusy !== ''} onClick={() => suggestHashtags(tab)}>Suggest</Button></div>
                                             {p.hasLink && <Field label='Link'><input className='input' disabled={!writable} value={v.link || ''} placeholder={form.link} onChange={(ev) => setVar(tab, { link: ev.target.value })} /></Field>}
                                             {p.fields.map((f: any) => {
                                                 const cur = (v.opts || {})[f.key] ?? f.default ?? (f.type === 'toggle' ? false : '');
@@ -503,7 +536,12 @@ export default function Composer({ id, query }: { id: string; query: Record<stri
                 </div>
             </div>
             {picker && <MediaPicker selected={form.mediaIds} onChange={(ids) => setForm({ ...form, mediaIds: ids })} onClose={() => { setPicker(false); loadMedia(); }} />}
-            {aiOpen && <AiHelper platform={curP} current={form.caption} onCaption={(t) => setForm({ ...form, caption: t })} onTags={(t) => setForm({ ...form, hashtags: Array.from(new Set(tagsOf(form.hashtags).concat(t))).join(' ') })} onClose={() => setAiOpen(false)} />}
+            {aiOpen && <AiHelper platform={curP} current={form.caption} onCaption={(t) => setForm({ ...form, caption: t })} onTags={(t) => {
+                if (curP && P[curP]) {
+                    const current = form.variants[curP] || {};
+                    setVar(curP, { hashtagsText: Array.from(new Set(tagsOf(current.hashtagsText || form.hashtags).concat(t))).join(' ') });
+                } else setForm({ ...form, hashtags: Array.from(new Set(tagsOf(form.hashtags).concat(t))).join(' ') });
+            }} onClose={() => setAiOpen(false)} />}
         </div>
     );
 }

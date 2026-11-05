@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Activity, Bell, CalendarDays, ChevronDown, ChevronsLeft, CreditCard, Images, LayoutDashboard, Link2, LogOut, Megaphone, Menu, Moon, PenSquare, Plus, Settings as Cog, ShieldCheck, Sparkles, Sun, Users } from 'lucide-react';
+import { Activity, Bell, CalendarDays, ChevronDown, ChevronsLeft, CreditCard, Download, Images, LayoutDashboard, Link2, LogOut, Megaphone, Menu, Moon, PenSquare, Plus, Settings as Cog, ShieldCheck, Sparkles, Sun, Users } from 'lucide-react';
 import * as A from './lib/api';
 import { AppProvider, useApp } from './lib/store';
 import { useRoute, go } from './lib/hooks';
-import { Button, Card, Empty, Field, Modal, Spinner, cx } from './lib/ui';
-import { timeAgo, timezones, browserTz } from './lib/format';
+import { Button, Card, Empty, Field, Spinner, cx } from './lib/ui';
+import { timeAgo } from './lib/format';
 import Onboarding from './pages/Onboarding';
 import Overview from './pages/Overview';
 import Analytics from './pages/Analytics';
@@ -14,6 +14,8 @@ import Settings from './pages/Settings';
 import Media from './pages/Media';
 import Calendar from './pages/Calendar';
 import Studio from './pages/Studio';
+import Team from './pages/Team';
+import Assistant from './pages/Assistant';
 
 const PAGES: Record<string, any> = {
     overview: Overview,
@@ -24,6 +26,8 @@ const PAGES: Record<string, any> = {
     media: Media,
     accounts: Accounts,
     settings: Settings,
+    team: Team,
+    assistant: Assistant,
 };
 
 const NAV: [string, string, any][] = [
@@ -63,7 +67,7 @@ function SignedOut() {
         <div className='auth-screen flex min-h-full flex-col items-center justify-center px-5 py-10'>
             <div className='auth-panel w-full max-w-[410px] p-6 text-center sm:p-8'>
             <div className='mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-brand text-lg font-extrabold text-white shadow-lg shadow-brand/20'>S<span className='text-accent'>.</span></div>
-            <h1 className='font-[Manrope] text-[27px] font-extrabold tracking-[-0.03em]'>SocialFlow<span className='text-brand'>.</span></h1>
+            <h1 className='font-[Manrope] text-[27px] font-extrabold tracking-[-0.03em]'>Sozial<span className='text-brand'>.</span></h1>
             <p className='mt-2 text-sm text-muted'>Create once. Schedule intelligently. Publish everywhere.</p>
             <form className='mt-7 space-y-3 text-left' onSubmit={(event) => { event.preventDefault(); void submit(); }}>
                 {register && <Field label='Name'><input className='input' autoComplete='name' value={name} onChange={(event) => setName(event.target.value)} required /></Field>}
@@ -73,46 +77,11 @@ function SignedOut() {
                 <Button type='submit' loading={busy} className='w-full !rounded-lg !py-3' variant='primary'>{register ? 'Create account' : 'Sign in'}</Button>
             </form>
             <button className='mt-5 text-xs font-medium text-muted hover:text-brand' onClick={() => { setError(''); setRegister(!register); }}>
-                {register ? 'Already have an account? Sign in' : 'New to SocialFlow? Create an account'}
+                {register ? 'Already have an account? Sign in' : 'New to Sozial? Create an account'}
             </button>
             </div>
             <p className='mt-5 text-[10px] text-muted'>A calmer way to run your social channels.</p>
         </div>
-    );
-}
-
-function NewWorkspace({ onClose }: { onClose: () => void }) {
-    const { refresh, toast, selectWs } = useApp();
-    const [name, setName] = useState('');
-    const [type, setType] = useState('agency');
-    const [tz, setTz] = useState(browserTz());
-    const [busy, setBusy] = useState(false);
-    const save = async () => {
-        setBusy(true);
-        try {
-            const r = await A.post('/api/workspaces', { name, type, timezone: tz });
-            await refresh();
-            selectWs(r.workspace.id);
-            onClose();
-        } catch (e: any) {
-            toast(e.message, 'err');
-        } finally {
-            setBusy(false);
-        }
-    };
-    return (
-        <Modal title='New workspace' onClose={onClose} size='sm'>
-            <div className='space-y-3'>
-                <Field label='Workspace or client name'><input className='input' autoFocus value={name} onChange={(e) => setName(e.target.value)} /></Field>
-                <Field label='Type'>
-                    <select className='input' value={type} onChange={(e) => setType(e.target.value)}>
-                        <option value='creator'>Content creator</option><option value='business'>Business</option><option value='agency'>Marketing agency</option><option value='manager'>Social media manager</option>
-                    </select>
-                </Field>
-                <Field label='Time zone'><select className='input' value={tz} onChange={(e) => setTz(e.target.value)}>{timezones().map((t) => <option key={t}>{t}</option>)}</select></Field>
-                <div className='flex justify-end gap-2 pt-2'><Button variant='secondary' onClick={onClose}>Cancel</Button><Button loading={busy} disabled={!name.trim()} onClick={save}>Create</Button></div>
-            </div>
-        </Modal>
     );
 }
 
@@ -157,19 +126,31 @@ function Bell_({ wsId }: { wsId: string }) {
     );
 }
 
+type DeferredInstallPrompt = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
+
+function InstallApp() {
+    const [prompt, setPrompt] = useState<DeferredInstallPrompt | null>(null);
+    useEffect(() => {
+        const capture = (event: Event) => {
+            event.preventDefault();
+            setPrompt(event as DeferredInstallPrompt);
+        };
+        window.addEventListener('beforeinstallprompt', capture);
+        return () => window.removeEventListener('beforeinstallprompt', capture);
+    }, []);
+    if (!prompt) return null;
+    return <Button size='sm' variant='secondary' onClick={async () => { await prompt.prompt(); await prompt.userChoice; setPrompt(null); }}><Download size={14} />Install</Button>;
+}
+
 function Shell() {
     const { ws, workspaces, selectWs, isAdmin, user, dark, toggleDark, signOut, can } = useApp();
     const { page, id, query } = useRoute();
     const [collapsed, setCollapsed] = useState(false);
     const [drawer, setDrawer] = useState(false);
-    const [creating, setCreating] = useState(false);
     const [accountMenu, setAccountMenu] = useState(false);
     useEffect(() => setDrawer(false), [page]);
 
-    if (!ws) {
-        if (isAdmin && page === 'admin') return <Admin />;
-        return <Onboarding />;
-    }
+    if (!ws) return isAdmin ? <Admin /> : <Onboarding />;
     const showOnboarding = !ws.onboardingDone && can('settings.manage');
     const items = NAV.filter(([k]) => PAGES[k]).concat(isAdmin && PAGES.admin ? [['admin', 'Administration', ShieldCheck] as [string, string, any]] : []);
     const Page = PAGES[page] || PAGES.overview;
@@ -192,12 +173,12 @@ function Shell() {
     };
     const brand = (compact: boolean) => <a href='#/overview' className='flex h-[76px] items-center gap-3 border-b border-line px-5'>
         <span className='flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand text-sm font-extrabold text-white shadow-[0_6px_14px_rgb(27_101_232_/_0.24)]'>S<span className='text-accent'>.</span></span>
-        {!compact && <span className='font-[Manrope] text-[19px] font-extrabold tracking-[-0.02em] text-ink'>SocialFlow<span className='text-brand'>.</span></span>}
+        {!compact && <span className='font-[Manrope] text-[19px] font-extrabold tracking-[-0.02em] text-ink'>Sozial<span className='text-brand'>.</span></span>}
     </a>;
-    const sidebar = (compact: boolean, mobile = false) => <aside className={cx('app-sidebar flex shrink-0 flex-col bg-surface', compact ? 'w-[78px]' : 'w-[252px]', mobile && 'h-full w-[286px] shadow-2xl')}>
+    const sidebar = (compact: boolean, mobile = false) => <aside className={cx('app-sidebar flex shrink-0 flex-col bg-surface', compact ? 'w-[78px]' : 'w-[252px]', mobile && 'relative z-10 h-full w-[286px] shadow-2xl')}>
         {brand(compact)}
-        {!compact && <div className='px-4 pt-4'><button className='flex w-full items-center gap-2 rounded-xl border border-line bg-surface2/70 p-2.5 text-left hover:bg-surface2' onClick={() => setCreating(true)}>
-            <span className='flex h-8 w-8 items-center justify-center rounded-lg bg-white text-brand shadow-sm'><Users size={15} /></span><span className='min-w-0 flex-1'><span className='block truncate text-xs font-semibold'>{ws.name}</span><span className='block text-[10px] text-muted'>Workspace</span></span><ChevronDown size={14} className='text-muted' />
+        {!compact && <div className='px-4 pt-4'><button className='flex w-full items-center gap-2 rounded-xl border border-line bg-surface2/70 p-2.5 text-left hover:bg-surface2 disabled:cursor-default' onClick={() => isAdmin && go('admin')} disabled={!isAdmin}>
+            <span className='flex h-8 w-8 items-center justify-center rounded-lg bg-white text-brand shadow-sm'><Users size={15} /></span><span className='min-w-0 flex-1'><span className='block truncate text-xs font-semibold'>{ws.name}</span><span className='block text-[10px] text-muted'>{isAdmin ? 'Superadmin · organizations' : 'Organization workspace'}</span></span>{isAdmin && <ShieldCheck size={14} className='text-brand' />}
         </button></div>}
         {nav(compact)}
         <div className='mt-auto border-t border-line p-3'>
@@ -219,11 +200,12 @@ function Shell() {
             <div className='flex min-w-0 flex-1 flex-col'>
                 <header className='app-topbar sticky top-0 z-30 flex h-[68px] shrink-0 items-center gap-3 border-b border-line bg-surface/90 px-4 backdrop-blur-xl sm:px-6 lg:px-8'>
                     <button className='toolbar-icon md:hidden' aria-label='Open menu' onClick={() => setDrawer(true)}><Menu size={19} /></button>
-                    <div className='flex min-w-0 items-center gap-2 text-xs text-muted'><span className='hidden sm:inline'>Workspace</span><ChevronDown size={13} className='hidden rotate-[-90deg] sm:block' /><select className='max-w-[210px] truncate border-0 bg-transparent py-1 text-sm font-semibold text-ink outline-none' value={ws.id} onChange={(e) => (e.target.value === '__new' ? setCreating(true) : selectWs(e.target.value))}>
-                        {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}<option value='__new'>+ New workspace</option>
+                    <div className='flex min-w-0 items-center gap-2 text-xs text-muted'><span className='hidden sm:inline'>Workspace</span><ChevronDown size={13} className='hidden rotate-[-90deg] sm:block' /><select className='max-w-[210px] truncate border-0 bg-transparent py-1 text-sm font-semibold text-ink outline-none' value={ws.id} onChange={(e) => selectWs(e.target.value)}>
+                        {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
                     </select></div>
                     <div className='flex-1' />
                     <span className='hidden text-xs text-muted lg:block'>{new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+                    <InstallApp />
                     {can('post.write') && <Button size='sm' className='!rounded-lg !px-3' onClick={() => go('studio/new')}><Plus size={15} /> <span className='hidden sm:inline'>Create post</span></Button>}
                     <Bell_ wsId={ws.id} />
                     <button className='toolbar-icon' aria-label='Toggle theme' title={dark ? 'Switch to light theme' : 'Switch to dark theme'} onClick={toggleDark}>{dark ? <Sun size={17} /> : <Moon size={17} />}</button>
@@ -238,7 +220,6 @@ function Shell() {
                     <div className='mx-auto w-full max-w-[1480px]'><Page key={ws.id + page + id} id={id} query={query} /></div>
                 </main>
             </div>
-            {creating && <NewWorkspace onClose={() => setCreating(false)} />}
             {showOnboarding && <Onboarding />}
         </div>
     );
@@ -246,7 +227,7 @@ function Shell() {
 
 export default function App() {
     return (
-        <AppProvider loading={<Spinner label='Loading SocialFlow' />} signedOut={<SignedOut />}>
+        <AppProvider loading={<Spinner label='Loading Sozial' />} signedOut={<SignedOut />}>
             <Shell />
         </AppProvider>
     );

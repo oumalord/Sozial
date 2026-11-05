@@ -1,6 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import type { NeonQueryFunction } from '@neondatabase/serverless';
-import { del, put } from '@vercel/blob';
+import { DeleteObjectsCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
@@ -112,12 +112,31 @@ export const db = {
   },
 };
 
+let cloudflareClient: S3Client | undefined;
+function r2Client(): S3Client {
+  const accountId = process.env.R2_ACCOUNT_ID;
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+  if (!accountId || !accessKeyId || !secretAccessKey) throw new Error('Configure R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY.');
+  return cloudflareClient ||= new S3Client({
+    region: 'auto',
+    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+    credentials: { accessKeyId, secretAccessKey },
+  });
+}
+
 export const storage = {
   write: async (files: { path: string; content: string; contentType: string }[]): Promise<{ url: string; path: string }[]> => {
+    const bucket = process.env.R2_BUCKET_NAME;
+    const publicBase = process.env.R2_PUBLIC_BASE_URL?.replace(/\/+$/, '');
+    if (!bucket || !publicBase) throw new Error('Configure R2_BUCKET_NAME and R2_PUBLIC_BASE_URL.');
+    if (new URL(publicBase).protocol !== 'https:') throw new Error('R2_PUBLIC_BASE_URL must use public HTTPS.');
+    const client = r2Client();
     const saved: { url: string; path: string }[] = [];
     for (const file of files) {
-      const blob = await put(file.path, Buffer.from(file.content, 'base64'), { access: 'public', contentType: file.contentType, addRandomSuffix: false, allowOverwrite: true });
-      saved.push({ path: file.path, url: blob.url });
+      await client.send(new PutObjectCommand({ Bucket: bucket, Key: file.path, Body: Buffer.from(file.content, 'base64'), ContentType: file.contentType, CacheControl: 'public, max-age=31536000, immutable' }));
+      const encodedPath = file.path.split('/').map(encodeURIComponent).join('/');
+      saved.push({ path: file.path, url: publicBase + '/' + encodedPath });
     }
     return saved;
   },
@@ -128,12 +147,17 @@ export const storage = {
     return rows.filter((row) => row.path && row.url);
   },
   delete: async (paths: string[]): Promise<void> => {
-    const urls = await storage.url(paths);
-    if (urls.length) await del(urls.map((item) => item.url));
+    if (!paths.length) return;
+    const bucket = process.env.R2_BUCKET_NAME;
+    if (!bucket) throw new Error('Configure R2_BUCKET_NAME before deleting media.');
+    const client = r2Client();
+    for (let i = 0; i < paths.length; i += 1000) {
+      await client.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: paths.slice(i, i + 1000).map((Key) => ({ Key })), Quiet: true } }));
+    }
   },
 };
 
-const configuredSecrets = ['AYRSHARE_API_KEY', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'MPESA_CONSUMER_KEY', 'MPESA_CONSUMER_SECRET', 'MPESA_SHORTCODE', 'MPESA_PASSKEY', 'OPENAI_API_KEY'];
+const configuredSecrets = ['POSTIZ_API_URL', 'POSTIZ_API_KEY', 'R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET_NAME', 'R2_PUBLIC_BASE_URL', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'MPESA_CONSUMER_KEY', 'MPESA_CONSUMER_SECRET', 'MPESA_SHORTCODE', 'MPESA_PASSKEY', 'OPENAI_API_KEY'];
 export const secrets = {
   listSecretNames: async (): Promise<string[]> => configuredSecrets.filter((name) => !!process.env[name]),
   readSecret: async (name: string): Promise<string> => {

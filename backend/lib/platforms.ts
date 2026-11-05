@@ -21,7 +21,6 @@ export interface PlatformDef {
   name: string;
   short: string;
   color: string;
-  ayrshareId: string;
   captionMax: number;
   captionLabel: string;
   hashtagMax?: number;
@@ -60,8 +59,8 @@ const vis = (opts: string[][]): { value: string; label: string }[] => opts.map((
 
 export const PLATFORMS: Record<string, PlatformDef> = {
   instagram: {
-    id: 'instagram', name: 'Instagram', short: 'IG', color: '#E1306C', ayrshareId: 'instagram',
-    captionMax: 2200, captionLabel: 'Caption', hashtagMax: 30, hasTitle: false, titleRequired: false, titleMax: 0, hasLink: false,
+    id: 'instagram', name: 'Instagram', short: 'IG', color: '#E1306C',
+    captionMax: 2200, captionLabel: 'Caption', hashtagMax: 5, hasTitle: false, titleRequired: false, titleMax: 0, hasLink: false,
     maxImages: 10, maxVideos: 10, mixedMedia: true,
     formats: [
       { value: 'feed', label: 'Feed post / carousel', needs: 'any', single: false },
@@ -75,7 +74,7 @@ export const PLATFORMS: Record<string, PlatformDef> = {
     notes: ['Personal accounts cannot publish through the API.', 'Up to 30 hashtags per post.'],
   },
   facebook: {
-    id: 'facebook', name: 'Facebook', short: 'FB', color: '#1877F2', ayrshareId: 'facebook',
+    id: 'facebook', name: 'Facebook', short: 'FB', color: '#1877F2',
     captionMax: 63206, captionLabel: 'Post text', hasTitle: false, titleRequired: false, titleMax: 0, hasLink: true,
     maxImages: 10, maxVideos: 1, mixedMedia: false,
     formats: [
@@ -89,7 +88,7 @@ export const PLATFORMS: Record<string, PlatformDef> = {
     notes: ['Publishing is to Facebook Pages, not personal profiles.'],
   },
   tiktok: {
-    id: 'tiktok', name: 'TikTok', short: 'TT', color: '#111827', ayrshareId: 'tiktok',
+    id: 'tiktok', name: 'TikTok', short: 'TT', color: '#111827',
     captionMax: 2200, captionLabel: 'Caption', hashtagMax: 30, hasTitle: false, titleRequired: false, titleMax: 0, hasLink: false,
     maxImages: 0, maxVideos: 1, mixedMedia: false,
     formats: [{ value: 'video', label: 'Video', needs: 'video', single: true }],
@@ -106,7 +105,7 @@ export const PLATFORMS: Record<string, PlatformDef> = {
     notes: ['Until the publishing app is audited TikTok limits posts to private visibility.'],
   },
   youtube: {
-    id: 'youtube', name: 'YouTube', short: 'YT', color: '#FF0000', ayrshareId: 'youtube',
+    id: 'youtube', name: 'YouTube', short: 'YT', color: '#FF0000',
     captionMax: 5000, captionLabel: 'Description', hashtagMax: 15, hasTitle: true, titleRequired: true, titleMax: 100, hasLink: false,
     maxImages: 0, maxVideos: 1, mixedMedia: false,
     formats: [
@@ -124,7 +123,7 @@ export const PLATFORMS: Record<string, PlatformDef> = {
     notes: ['Unverified API projects have their uploads locked to private.'],
   },
   linkedin: {
-    id: 'linkedin', name: 'LinkedIn', short: 'IN', color: '#0A66C2', ayrshareId: 'linkedin',
+    id: 'linkedin', name: 'LinkedIn', short: 'IN', color: '#0A66C2',
     captionMax: 3000, captionLabel: 'Post text', hasTitle: false, titleRequired: false, titleMax: 0, hasLink: true,
     maxImages: 9, maxVideos: 1, mixedMedia: false,
     formats: [{ value: 'post', label: 'Post', needs: 'none', single: false }],
@@ -135,7 +134,7 @@ export const PLATFORMS: Record<string, PlatformDef> = {
     notes: ['Organization posting needs admin rights on the page.'],
   },
   x: {
-    id: 'x', name: 'X (Twitter)', short: 'X', color: '#0F1419', ayrshareId: 'twitter',
+    id: 'x', name: 'X (Twitter)', short: 'X', color: '#0F1419',
     captionMax: 280, captionLabel: 'Post text', hasTitle: false, titleRequired: false, titleMax: 0, hasLink: false,
     maxImages: 4, maxVideos: 1, mixedMedia: false,
     formats: [{ value: 'post', label: 'Post', needs: 'none', single: false }],
@@ -146,7 +145,7 @@ export const PLATFORMS: Record<string, PlatformDef> = {
     notes: ['Character count is approximate: X counts every link as 23 characters.'],
   },
   pinterest: {
-    id: 'pinterest', name: 'Pinterest', short: 'PI', color: '#E60023', ayrshareId: 'pinterest',
+    id: 'pinterest', name: 'Pinterest', short: 'PI', color: '#E60023',
     captionMax: 800, captionLabel: 'Pin description', hasTitle: true, titleRequired: true, titleMax: 100, hasLink: true,
     maxImages: 1, maxVideos: 1, mixedMedia: false,
     formats: [{ value: 'pin', label: 'Pin', needs: 'any', single: true }],
@@ -157,7 +156,7 @@ export const PLATFORMS: Record<string, PlatformDef> = {
     notes: ['A pin needs an image or video and a destination board.'],
   },
   threads: {
-    id: 'threads', name: 'Threads', short: 'TH', color: '#000000', ayrshareId: 'threads',
+    id: 'threads', name: 'Threads', short: 'TH', color: '#000000',
     captionMax: 500, captionLabel: 'Post text', hasTitle: false, titleRequired: false, titleMax: 0, hasLink: true,
     maxImages: 20, maxVideos: 20, mixedMedia: true,
     formats: [{ value: 'post', label: 'Post', needs: 'none', single: false }],

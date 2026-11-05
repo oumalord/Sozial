@@ -38,7 +38,7 @@ export default function Bulk() {
         const url = URL.createObjectURL(new Blob([sample], { type: 'text/csv' }));
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'socialflow-bulk-template.csv';
+        a.download = 'sozial-bulk-template.csv';
         a.click();
         URL.revokeObjectURL(url);
     };
